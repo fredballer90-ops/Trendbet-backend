@@ -669,19 +669,25 @@ app.get('/api/test-firebase', (req, res) => {
 });
 
 
-// 
+// Debug environment variables
 app.get('/api/debug/env', (req, res) => {
-  res.json({
-    firebaseVars: {
-      hasProjectId: !!process.env.FIREBASE_PROJECT_ID,
-      hasClientEmail: !!process.env.FIREBASE_CLIENT_EMAIL,
-      hasPrivateKey: !!process.env.FIREBASE_PRIVATE_KEY,
-      privateKeyLength: process.env.FIREBASE_PRIVATE_KEY?.length,
-      envKeys: Object.keys(process.env).filter(key => key.startsWith('FIREBASE_'))
+  const firebaseVars = {
+    hasProjectId: !!process.env.FIREBASE_PROJECT_ID,
+    hasClientEmail: !!process.env.FIREBASE_CLIENT_EMAIL,
+    hasPrivateKey: !!process.env.FIREBASE_PRIVATE_KEY,
+    privateKeyLength: process.env.FIREBASE_PRIVATE_KEY?.length,
+    allFirebaseVars: {}
+  };
+
+  // Get all Firebase environment variables (hide values for security)
+  Object.keys(process.env).forEach(key => {
+    if (key.startsWith('FIREBASE_')) {
+      firebaseVars.allFirebaseVars[key] = process.env[key] ? 'SET' : 'NOT SET';
     }
   });
-});
 
+  res.json(firebaseVars);
+});
 
 // ==================== ERROR HANDLING ====================
 
