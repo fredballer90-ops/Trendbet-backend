@@ -656,6 +656,18 @@ app.get('/api/debug/firebase', async (req, res) => {
   }
 });
 
+// Simple Firebase test endpoint
+app.get('/api/test-firebase', (req, res) => {
+  const firebaseVars = {
+    hasProjectId: !!process.env.FIREBASE_PROJECT_ID,
+    hasClientEmail: !!process.env.FIREBASE_CLIENT_EMAIL, 
+    hasPrivateKey: !!process.env.FIREBASE_PRIVATE_KEY,
+    privateKeyStarts: process.env.FIREBASE_PRIVATE_KEY ? 
+      process.env.FIREBASE_PRIVATE_KEY.substring(0, 50) + '...' : 'MISSING'
+  };
+  res.json(firebaseVars);
+});
+
 // ==================== ERROR HANDLING ====================
 
 // Error handling
