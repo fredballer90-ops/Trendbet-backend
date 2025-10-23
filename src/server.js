@@ -692,11 +692,26 @@ app.use((req, res) => {
 const PORT = process.env.PORT || 10000;
 const HOST = '0.0.0.0';
 
-app.listen(PORT, HOST, () => {
+// --- Health check route (Render needs this)
+app.get("/", (req, res) => {
+  res.status(200).send("✅ TrendBet backend is live");
+});
+
+const server = app.listen(PORT, HOST, () => {
   console.log(`🚀 TrendBet Server running on http://${HOST}:${PORT}`);
   console.log(`📊 Local: http://localhost:${PORT}/api/health`);
   console.log(`🌐 Network: http://192.168.2.100:${PORT}/api/health`);
-  console.log(`🐛 Debug: http://localhost:${PORT}/api/debug/users`);
-  console.log(`🔥 Firebase: http://localhost:${PORT}/api/debug/firebase`);
-  console.log(`🎯 Betting: ${db ? '✅ Enabled' : '❌ Disabled'}`);
+  console.log(`🐛 Debug: http://localhost:${PORT}/api/debug`);
+  console.log(`🔥 Firebase: http://localhost:${PORT}/api/dbtest`);
+  console.log(`🎯 Betting: ${db ? "✅ Enabled" : "❌ Disabled"}`);
+
+  // --- Delay Firebase initialization to prevent Render timeout
+  setTimeout(() => {
+    initializeFirebase();
+    console.log("🔥 Firebase initialized after startup delay");
+  }, 3000);
 });
+
+// --- Prevent Render timeout kills for slow starts
+server.keepAliveTimeout = 120000;
+server.headersTimeout = 120000;
