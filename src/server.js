@@ -668,6 +668,21 @@ app.get('/api/test-firebase', (req, res) => {
   res.json(firebaseVars);
 });
 
+
+// 
+app.get('/api/debug/env', (req, res) => {
+  res.json({
+    firebaseVars: {
+      hasProjectId: !!process.env.FIREBASE_PROJECT_ID,
+      hasClientEmail: !!process.env.FIREBASE_CLIENT_EMAIL,
+      hasPrivateKey: !!process.env.FIREBASE_PRIVATE_KEY,
+      privateKeyLength: process.env.FIREBASE_PRIVATE_KEY?.length,
+      envKeys: Object.keys(process.env).filter(key => key.startsWith('FIREBASE_'))
+    }
+  });
+});
+
+
 // ==================== ERROR HANDLING ====================
 
 // Error handling
