@@ -29,6 +29,7 @@ function initializeFirebase() {
     if (!admin.apps.length) {
       console.log('🔄 Initializing Firebase with hardcoded config...');
       
+      // COMPLETE FIREBASE CONFIG - NO ENVIRONMENT VARIABLES NEEDED
       const firebaseConfig = {
         type: "service_account",
         project_id: "trendbet-c2793",
@@ -57,7 +58,6 @@ function initializeFirebase() {
     return null;
   }
 }
-
 
 // Initialize Firebase when server starts
 db = initializeFirebase();
@@ -658,46 +658,11 @@ app.get('/api/debug/firebase', async (req, res) => {
   }
 });
 
-// Simple Firebase test endpoint
-app.get('/api/test-firebase', (req, res) => {
-  const firebaseVars = {
-    hasProjectId: !!process.env.FIREBASE_PROJECT_ID,
-    hasClientEmail: !!process.env.FIREBASE_CLIENT_EMAIL, 
-    hasPrivateKey: !!process.env.FIREBASE_PRIVATE_KEY,
-    privateKeyStarts: process.env.FIREBASE_PRIVATE_KEY ? 
-      process.env.FIREBASE_PRIVATE_KEY.substring(0, 50) + '...' : 'MISSING'
-  };
-  res.json(firebaseVars);
-});
-
-
-// Debug environment variables
+// Test Firebase initialization
 app.get('/api/test-firebase-init', (req, res) => {
   try {
-    console.log('🔄 Testing Firebase initialization...');
-    
-    // Test if Firebase can initialize
-    const firebaseConfig = {
-      type: "service_account",
-      project_id: "trendbet-c2793",
-      private_key_id: "e7865322e05be6ac0bdf34138b5ec5c233628fba",
-      private_key: "-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQDRkhhqu2kNDCUc\nxVukGjeflzHtzK4V7/xbgBGxRrPk9Z+31mbXLgKKym/b8H7oFbh3ZqLAhrNuZoXh\noH+yDCjbiwt2u0gpo050Y3iNa2oNIv5cIl5LBQlDQN71/2GrI+n+sZXUA8XOUWwe\nsv/TNTqd6JU3tpAh4qKp4zUhz89k5iVvVL4tHhWEWQBQyHIlko4+BpBSJDtdDpbH\n9f0JTLPAesknDhbYtjcykdNkiJ1ntSwdMAuhx1otlgJXJGMZJ3/SRpccFUYMiG7o\ns8vqRE0PKTP58bRVdWgib5JHm2UL2xkyT2mN061Mt0uoGVpa/wBkJew7OXz8R2BG\nLRAhkIFBAgMBAAECggEACAWcOQrnwF1VuWqr7wlh36/YYH+7rd+ZgaD5+LRwIXla\nYtigmPtkpr+0rfi43fKgvoxgIY3fCGz3TW+tzEKhqg0Vt94SvptuSzbYc7ZH8nvc\nHtZryx8JnUTOHKqkCr94kYKhd2xuxtiHploae0JH4pVZyrh24Xeh25WvzvgjRCzJ\nW1v3doT7bMVQ+gbT8hFppDoWeUITbc5xkbCwBi76QQjbJbFkHB9m7fCxIFbB5Dz/\nAIeyg0HautGFqwpyo46mzy3373WqcKiRWzHcppLhEOHXngdRd9t1d8c4iESnCEBc\nGJUD9ojxL0ON+v1PKY2pTcIKbcRogoNBhOnca4icEQKBgQDrxLAN88pblOuaIg70\nrJdQA+NAY1OhZpNIw9LSEDPX+OdjY6wFYf2tqdSrYbiUECbln0GRbwJR6EFWP7nw\n0FuMQdRkFtkh3kfX7vFdQ44lxo9JU+IiJ0/dVSmm2iflXh6A72NiHMregCQJ3JKf\nY2J7ZF+HSgILIa8piKEFElSuswKBgQDjjec/9+Biz6tsV1AJrI7JmV5pv0hiFXBY\n5euqwi/kedvRTCrHNNz2krst3yeaEg5+goXjnm6zZGP6F9f0EtilgbQCPKYL3C5c\nYIP+ksoY9VjWWKzvDMTCZNzDMbPgVAcR/swaW8deVie2X3V+AuTa34gkN1MgY1z9\nu6ncuoHKOwKBgHEw9PU93iEp1hMh1txRIDQiKbB3/2a1wHBm04hWjw1ZSn3FFIlh\nClGd/6RoPh2Xw5TqaKhSC2MXhobKAZND9S/ZSwbikUxZU1SwOuDz1gL82T3zL9YF\n2aoBgQXCJvVPwoVUaPppqFw6WRMC+sHbDSUAg3yIY4LEoTvnhKbSriVRAoGAByG9\na63TJIWps72QzpzP5NWfteS+2gQd/0tFdZacdaa0Ev02IgQwILI8l5V04klKlwB0\nPcwLYCf3UjFJHWcxzw4fnCpWcey2r0J/II1tNBcMb7tbwCpASG9s09lM7+zyQ8ge\nkXzq5LQCjp6zSf3BOnLjC2+IdW1nzrQBAN//jV0CgYEArV/bGav2II1kT4qQF6uZ\nWMHyfZ5zYxj+mb0iKx6C+P6jUT6oRkPTIMJrpq69weVeuWpnh/uLo5Uu07UyqQnT\n75GFNefHJoREtuohy82FdLIHRZRm9SVxglrjACj8SeUzMJMfrnYcb+69cOsGbBYh\n3k7T3RTSQSXd20bb4e9KN9k=\n-----END PRIVATE KEY-----\n",
-      client_email: "firebase-adminsdk-fbsvc@trendbet-c2793.iam.gserviceaccount.com",
-      client_id: "106370486515535071439",
-      auth_uri: "https://accounts.google.com/o/oauth2/auth",
-      token_uri: "https://oauth2.googleapis.com/token",
-      auth_provider_x509_cert_url: "https://www.googleapis.com/oauth2/v1/certs",
-      client_x509_cert_url: "https://www.googleapis.com/robot/v1/metadata/x509/firebase-adminsdk-fbsvc%40trendbet-c2793.iam.gserviceaccount.com"
-    };
-
-    admin.initializeApp({
-      credential: admin.credential.cert(firebaseConfig),
-      databaseURL: "https://trendbet-c2793-default-rtdb.firebaseio.com"
-    });
-
     const testDb = admin.database();
     res.json({ success: true, message: "Firebase initialized successfully!" });
-    
   } catch (error) {
     res.json({ success: false, error: error.message });
   }
@@ -724,7 +689,7 @@ app.use((req, res) => {
 
 // ==================== SERVER START ====================
 
-const PORT = process.env.PORT || 5001;
+const PORT = process.env.PORT || 10000;
 const HOST = '0.0.0.0';
 
 app.listen(PORT, HOST, () => {
