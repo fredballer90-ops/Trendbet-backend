@@ -3,7 +3,6 @@
   "name": "trendbet-backend",
   "version": "1.0.0",
   "description": "TrendBet Backend API",
-  "type": "module",
   "main": "src/server.js",
   "scripts": {
     "dev": "nodemon src/server.js",
