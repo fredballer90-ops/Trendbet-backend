@@ -11,8 +11,8 @@ app.use(cors({
 }));
 app.use(express.json());
 
-// db handle from firebase admin (may be null if not initialized)
-const db = (admin && typeof admin.database === 'function') ? admin.database() : null;
+// db handle - will be null if Firebase not available
+const db = admin ? admin.database() : null;
 
 // Request logging middleware
 app.use((req, res, next) => {
@@ -332,6 +332,7 @@ app.get('/api/debug/firebase', async (req, res) => {
 
 app.get('/api/test-firebase-init', (req, res) => {
   try {
+    if (!admin) return res.json({ success: false, error: "Firebase not initialized" });
     const testDb = admin.database();
     return res.json({ success: true, message: "Firebase initialized successfully!" });
   } catch (error) {
