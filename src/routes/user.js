@@ -1,6 +1,6 @@
+import admin from "../config/firebase.js";
 const express = require('express');
 const router = express.Router();
-const admin = require('firebase-admin');
 
 const db = admin.database();
 

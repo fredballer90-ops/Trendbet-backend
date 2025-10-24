@@ -1,6 +1,6 @@
+import admin from "./config/firebase.js";
 const express = require('express');
 const cors = require('cors');
-const admin = require('firebase-admin');
 
 const app = express();
 
@@ -23,7 +23,6 @@ app.use((req, res, next) => {
 });
 
 // ==================== FIREBASE INITIALIZATION ====================
-import admin from "firebase-admin";
 
 function initializeFirebase() {
   try {
