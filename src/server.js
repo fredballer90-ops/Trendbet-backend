@@ -29,7 +29,9 @@ app.use((req, res, next) => {
 // In-memory DB for auth flows
 const memoryDB = {
   users: [],
-  otps: []
+  otps: [],
+  bets: [],
+  markets: []
 };
 
 // ---------- HEALTH ----------
@@ -39,7 +41,9 @@ app.get('/api/health', (req, res) => {
     message: 'TrendBet API is running!',
     database: 'In-memory + Firebase',
     usersCount: memoryDB.users.length,
-    firebaseStatus: db ? 'Connected' : 'Disabled',
+    betsCount: memoryDB.bets.length,
+    marketsCount: memoryDB.markets.length,
+    firebaseStatus: db ? '✅ Enabled' : '❌ Disabled',
     timestamp: new Date().toISOString(),
     clientIP: req.ip
   });
@@ -77,6 +81,8 @@ app.post('/api/auth/register', (req, res) => {
       email,
       password,
       balance: 1000,
+      totalWagered: 0,
+      totalWinnings: 0,
       role: 'user',
       createdAt: new Date().toISOString()
     };
@@ -192,126 +198,314 @@ app.post('/api/otp/resend', (req, res) => {
   }
 });
 
-// ---------- FIREBASE BETTING ROUTES ----------
+// ---------- BACKEND BETTING ROUTES ----------
 app.post('/api/place-bet', async (req, res) => {
   try {
-    if (!db) return res.status(503).json({ error: 'Betting service temporarily unavailable' });
+    const { userId, marketId, selection, odds, stake, potentialWin, category } = req.body;
+    
+    if (!userId || !marketId || !selection || !stake) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'Missing required fields: userId, marketId, selection, stake' 
+      });
+    }
 
-    const { uid, matchId, outcome, amount } = req.body;
-    if (!uid || !matchId || !outcome || !amount) return res.status(400).json({ error: 'Missing required fields: uid, matchId, outcome, amount' });
+    // Find user in memoryDB
+    const user = memoryDB.users.find(u => u.id === userId);
+    if (!user) {
+      return res.status(404).json({ 
+        success: false, 
+        error: 'User not found' 
+      });
+    }
 
-    const userRef = db.ref(`users/${uid}`);
-    const userSnapshot = await userRef.once('value');
-    const user = userSnapshot.val();
+    // Check if user has sufficient balance
+    const stakeAmount = parseFloat(stake);
+    if (user.balance < stakeAmount) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'Insufficient balance' 
+      });
+    }
 
-    if (!user || user.balance < amount) return res.status(400).json({ error: 'Insufficient balance' });
+    // Generate unique bet ID
+    const betId = `bet_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    
+    // Create bet object
+    const betOdds = odds || 2.0;
+    const betPotentialWin = potentialWin || stakeAmount * betOdds;
+    
+    const betData = {
+      id: betId,
+      userId,
+      marketId,
+      selection,
+      odds: betOdds,
+      stake: stakeAmount,
+      potentialWin: betPotentialWin,
+      category: category || 'general',
+      status: 'pending',
+      placedAt: new Date().toISOString(),
+      settledAt: null,
+      result: null
+    };
 
-    const matchRef = db.ref(`matches/${matchId}`);
-    const matchSnapshot = await matchRef.once('value');
-    const match = matchSnapshot.val();
+    // Update user balance and stats
+    user.balance -= stakeAmount;
+    user.totalWagered = (user.totalWagered || 0) + stakeAmount;
 
-    if (!match || match.status !== 'active') return res.status(400).json({ error: 'Match not available for betting' });
+    // Store bet in memoryDB
+    memoryDB.bets.push(betData);
 
-    const betId = `bet_${Date.now()}_${Math.random().toString(36).substr(2,9)}`;
-    const betData = { uid, matchId, outcome, amount: parseFloat(amount), timestamp: Date.now(), status: 'pending' };
+    console.log(`💰 Bet placed: User ${userId} bet ${stake} on ${selection}`);
+    console.log(`📊 New balance: ${user.balance}`);
 
-    await db.ref().update({
-      [`users/${uid}/balance`]: user.balance - amount,
-      [`bets/${betId}`]: betData,
-      [`userBets/${uid}/${betId}`]: true
+    return res.json({ 
+      success: true, 
+      betId, 
+      newBalance: user.balance,
+      message: 'Bet placed successfully',
+      bet: betData
     });
 
-    return res.json({ success: true, betId, newBalance: user.balance - amount, message: 'Bet placed successfully' });
   } catch (error) {
     console.error('💥 PLACE BET ERROR:', error);
-    return res.status(500).json({ error: 'Failed to place bet: ' + error.message });
+    return res.status(500).json({ 
+      success: false,
+      error: 'Failed to place bet: ' + error.message 
+    });
   }
 });
 
-app.get('/api/user/:uid/balance', async (req, res) => {
+app.get('/api/user/:userId/balance', (req, res) => {
   try {
-    const { uid } = req.params;
-    if (!db) return res.status(503).json({ error: 'Service temporarily unavailable' });
-
-    const userRef = db.ref(`users/${uid}`);
-    const userSnapshot = await userRef.once('value');
-    const user = userSnapshot.val();
-    if (!user) return res.status(404).json({ error: 'User not found in database' });
-
-    return res.json({ uid, balance: user.balance || 0, username: user.username || 'User' });
+    const { userId } = req.params;
+    const user = memoryDB.users.find(u => u.id === userId);
+    
+    if (!user) {
+      return res.status(404).json({ success: false, error: 'User not found' });
+    }
+    
+    res.json({
+      success: true,
+      balance: user.balance,
+      totalWagered: user.totalWagered || 0,
+      totalWinnings: user.totalWinnings || 0
+    });
   } catch (error) {
     console.error('💥 GET BALANCE ERROR:', error);
-    return res.status(500).json({ error: 'Failed to get user balance' });
+    res.status(500).json({ success: false, error: 'Failed to get user balance' });
   }
 });
 
-app.post('/api/resolve-market', async (req, res) => {
+app.get('/api/user/:userId/bets', (req, res) => {
   try {
-    if (!db) return res.status(503).json({ error: 'Service temporarily unavailable' });
+    const { userId } = req.params;
+    
+    const userBets = memoryDB.bets.filter(bet => bet.userId === userId);
+    
+    res.json({
+      success: true,
+      bets: userBets
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
 
-    const { matchId, winningOutcome } = req.body;
-    if (!matchId || !winningOutcome) return res.status(400).json({ error: 'Missing matchId or winningOutcome' });
+// ---------- ADMIN ROUTES ----------
+app.post('/api/admin/create-market', (req, res) => {
+  try {
+    const { title, description, category, startTime, endTime, options, status } = req.body;
+    
+    if (!title || !options || !Array.isArray(options)) {
+      return res.status(400).json({ success: false, error: 'Title and options are required' });
+    }
 
-    const betsRef = db.ref('bets');
-    const betsSnapshot = await betsRef.orderByChild('matchId').equalTo(matchId).once('value');
-    const bets = betsSnapshot.val() || {};
+    const marketId = `market_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    
+    const market = {
+      id: marketId,
+      title,
+      description: description || '',
+      category: category || 'general',
+      startTime: startTime || null,
+      endTime: endTime || null,
+      options,
+      status: status || 'open',
+      result: null,
+      createdAt: new Date().toISOString()
+    };
 
-    let updates = {};
-    let winners = [];
-    let losers = [];
+    memoryDB.markets.push(market);
 
-    Object.keys(bets).forEach(betId => {
-      const bet = bets[betId];
-      if (bet.outcome === winningOutcome) {
-        updates[`bets/${betId}/status`] = 'won';
-        updates[`bets/${betId}/payout`] = bet.amount * 2;
-        winners.push(bet.uid);
-      } else {
-        updates[`bets/${betId}/status`] = 'lost';
-        losers.push(bet.uid);
+    console.log(`🏟️ Market created: ${title} with ${options.length} options`);
+
+    res.json({
+      success: true,
+      marketId,
+      message: 'Market created successfully',
+      market
+    });
+  } catch (error) {
+    console.error('💥 CREATE MARKET ERROR:', error);
+    res.status(500).json({ success: false, error: 'Failed to create market' });
+  }
+});
+
+app.get('/api/admin/markets', (req, res) => {
+  try {
+    res.json({
+      success: true,
+      markets: memoryDB.markets
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+app.post('/api/admin/resolve-market', (req, res) => {
+  try {
+    const { marketId, result } = req.body;
+    
+    if (!marketId || !result) {
+      return res.status(400).json({ success: false, error: 'Market ID and result are required' });
+    }
+
+    const market = memoryDB.markets.find(m => m.id === marketId);
+    if (!market) {
+      return res.status(404).json({ success: false, error: 'Market not found' });
+    }
+
+    // Update market
+    market.status = 'resolved';
+    market.result = result;
+    market.resolvedAt = new Date().toISOString();
+
+    // Find and update winning bets
+    const winningBets = memoryDB.bets.filter(bet => 
+      bet.marketId === marketId && bet.selection === result && bet.status === 'pending'
+    );
+
+    let totalPayout = 0;
+    let winnersCount = 0;
+
+    winningBets.forEach(bet => {
+      const user = memoryDB.users.find(u => u.id === bet.userId);
+      if (user) {
+        const payout = bet.potentialWin;
+        user.balance += payout;
+        user.totalWinnings = (user.totalWinnings || 0) + payout;
+        bet.status = 'won';
+        bet.settledAt = new Date().toISOString();
+        bet.result = 'won';
+        totalPayout += payout;
+        winnersCount++;
       }
     });
 
-    updates[`matches/${matchId}/status`] = 'completed';
-    updates[`matches/${matchId}/winningOutcome`] = winningOutcome;
+    // Mark losing bets
+    const losingBets = memoryDB.bets.filter(bet => 
+      bet.marketId === marketId && bet.selection !== result && bet.status === 'pending'
+    );
 
-    const uniqueWinners = [...new Set(winners)];
-    for (const uid of uniqueWinners) {
-      const userWinningBets = Object.keys(bets).filter(betId => bets[betId].uid === uid && bets[betId].outcome === winningOutcome);
-      const totalWin = userWinningBets.reduce((sum, betId) => sum + (bets[betId].amount * 2), 0);
-      const userRef = db.ref(`users/${uid}`);
-      const userSnapshot = await userRef.once('value');
-      const user = userSnapshot.val();
-      updates[`users/${uid}/balance`] = (user.balance || 0) + totalWin;
-    }
+    losingBets.forEach(bet => {
+      bet.status = 'lost';
+      bet.settledAt = new Date().toISOString();
+      bet.result = 'lost';
+    });
 
-    await db.ref().update(updates);
+    console.log(`🎯 Market resolved: ${market.title} -> ${result}`);
+    console.log(`💰 ${winnersCount} winners, total payout: ${totalPayout}`);
 
-    return res.json({ success: true, message: `Market resolved. ${winners.length} winners, ${losers.length} losers.`, winners: uniqueWinners.length, losers: losers.length });
+    res.json({
+      success: true,
+      message: `Market resolved: ${result}`,
+      winners: winnersCount,
+      losers: losingBets.length,
+      totalPayout
+    });
   } catch (error) {
     console.error('💥 RESOLVE MARKET ERROR:', error);
-    return res.status(500).json({ error: 'Failed to resolve market: ' + error.message });
+    res.status(500).json({ success: false, error: 'Failed to resolve market' });
   }
 });
 
-app.post('/api/freeze-market', async (req, res) => {
+app.post('/api/admin/freeze-market', (req, res) => {
   try {
-    if (!db) return res.status(503).json({ error: 'Service temporarily unavailable' });
+    const { marketId, freeze } = req.body;
+    
+    if (!marketId) {
+      return res.status(400).json({ success: false, error: 'Market ID is required' });
+    }
 
-    const { matchId } = req.body;
-    if (!matchId) return res.status(400).json({ error: 'Missing matchId' });
+    const market = memoryDB.markets.find(m => m.id === marketId);
+    if (!market) {
+      return res.status(404).json({ success: false, error: 'Market not found' });
+    }
 
-    await db.ref(`matches/${matchId}/status`).set('frozen');
-    return res.json({ success: true, message: 'Market frozen successfully' });
+    market.status = freeze ? 'frozen' : 'open';
+
+    res.json({
+      success: true,
+      message: `Market ${freeze ? 'frozen' : 'unfrozen'} successfully`,
+      market
+    });
   } catch (error) {
     console.error('💥 FREEZE MARKET ERROR:', error);
-    return res.status(500).json({ error: 'Failed to freeze market: ' + error.message });
+    res.status(500).json({ success: false, error: 'Failed to freeze market' });
+  }
+});
+
+app.post('/api/admin/user-balance', (req, res) => {
+  try {
+    const { userId, amount } = req.body;
+    
+    const user = memoryDB.users.find(u => u.id === userId);
+    if (!user) {
+      return res.status(404).json({ success: false, error: 'User not found' });
+    }
+    
+    user.balance += parseFloat(amount);
+    
+    res.json({
+      success: true,
+      message: `Added ${amount} to user balance`,
+      newBalance: user.balance
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
 // ---------- DEBUG ----------
 app.get('/api/debug/users', (req, res) => {
-  return res.json({ users: memoryDB.users.map(u => ({ id: u.id, name: u.name, phone: u.phone, email: u.email })), otps: memoryDB.otps, currentTime: Date.now() });
+  return res.json({ 
+    users: memoryDB.users.map(u => ({ 
+      id: u.id, 
+      name: u.name, 
+      phone: u.phone, 
+      email: u.email,
+      balance: u.balance,
+      role: u.role
+    })), 
+    otps: memoryDB.otps, 
+    currentTime: Date.now() 
+  });
+});
+
+app.get('/api/debug/bets', (req, res) => {
+  return res.json({
+    bets: memoryDB.bets,
+    totalBets: memoryDB.bets.length
+  });
+});
+
+app.get('/api/debug/markets', (req, res) => {
+  return res.json({
+    markets: memoryDB.markets,
+    totalMarkets: memoryDB.markets.length
+  });
 });
 
 app.get('/api/debug/firebase', async (req, res) => {
@@ -322,9 +516,18 @@ app.get('/api/debug/firebase', async (req, res) => {
     const matchesRef = db.ref('matches');
     const betsRef = db.ref('bets');
 
-    const [usersSnapshot, matchesSnapshot, betsSnapshot] = await Promise.all([ usersRef.once('value'), matchesRef.once('value'), betsRef.once('value') ]);
+    const [usersSnapshot, matchesSnapshot, betsSnapshot] = await Promise.all([ 
+      usersRef.once('value'), 
+      matchesRef.once('value'), 
+      betsRef.once('value') 
+    ]);
 
-    return res.json({ firebase: 'connected', users: usersSnapshot.val() || {}, matches: matchesSnapshot.val() || {}, bets: betsSnapshot.val() || {} });
+    return res.json({ 
+      firebase: 'connected', 
+      users: usersSnapshot.val() || {}, 
+      matches: matchesSnapshot.val() || {}, 
+      bets: betsSnapshot.val() || {} 
+    });
   } catch (error) {
     return res.json({ firebase: 'error', error: error.message });
   }
@@ -359,6 +562,7 @@ const server = app.listen(PORT, HOST, () => {
   console.log(`🌐 Network: http://192.168.2.100:${PORT}/api/health`);
   console.log(`🐛 Debug: http://localhost:${PORT}/api/debug/users`);
   console.log(`🔥 Firebase: ${db ? '✅ Enabled' : '❌ Disabled'}`);
+  console.log(`💾 Memory DB: ${memoryDB.users.length} users, ${memoryDB.bets.length} bets, ${memoryDB.markets.length} markets`);
 });
 
 server.keepAliveTimeout = 120000;
