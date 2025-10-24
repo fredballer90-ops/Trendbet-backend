@@ -3,7 +3,8 @@ import admin from 'firebase-admin';
 // Skip Firebase initialization if service account key is missing
 if (!process.env.FIREBASE_SERVICE_ACCOUNT_KEY || !process.env.FIREBASE_PRIVATE_KEY) {
   console.log('⚠️  Firebase credentials not found - running without Firebase');
-  export default null;
+  const adminNull = null;
+  export default adminNull;
 } else {
   try {
     // Parse the main service account JSON
@@ -37,6 +38,7 @@ if (!process.env.FIREBASE_SERVICE_ACCOUNT_KEY || !process.env.FIREBASE_PRIVATE_K
     console.error('❌ Firebase initialization failed:', error.message);
     console.error('Full error:', error);
     console.log('🔄 Running without Firebase - using in-memory database only');
-    export default null;
+    const adminNull = null;
+    export default adminNull;
   }
 }
