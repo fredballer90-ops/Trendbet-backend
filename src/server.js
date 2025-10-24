@@ -28,6 +28,9 @@ app.use((req, res, next) => {
   next();
 });
 
+// Import betting engine
+import { placeBet, getUserBalance, resolveMarket, setMarketFreeze } from './utils/bettingEngine.js';
+
 // Firebase helper functions
 const firebaseHelpers = {
   async getUserByEmail(email) {
@@ -196,18 +199,19 @@ app.get('/api/markets', async (req, res) => {
       return res.status(500).json({ error: 'Database not available' });
     }
 
-    const matchesRef = db.ref('markets');
-    const snapshot = await matchesRef.orderByChild('status').equalTo('active').once('value');
-    const matches = snapshot.val() || {};
+    const marketsRef = db.ref('markets');
+    const snapshot = await marketsRef.orderByChild('status').equalTo('active').once('value');
+    const markets = snapshot.val() || {};
 
-    const marketsArray = Object.keys(matches).map(id => ({
+    const marketsArray = Object.keys(markets).map(id => ({
       id,
-      ...matches[id]
+      ...markets[id]
     }));
 
     res.json({
       success: true,
-      markets: marketsArray
+      markets: marketsArray,
+      count: marketsArray.length
     });
   } catch (error) {
     console.error('❌ Error fetching markets:', error);
@@ -222,21 +226,162 @@ app.get('/api/markets/:marketId', async (req, res) => {
     }
 
     const { marketId } = req.params;
-    const matchRef = db.ref(`matches/${marketId}`);
-    const snapshot = await matchRef.once('value');
-    const match = snapshot.val();
+    const marketRef = db.ref(`markets/${marketId}`);
+    const snapshot = await marketRef.once('value');
+    const market = snapshot.val();
 
-    if (!match) {
+    if (!market) {
       return res.status(404).json({ error: 'Market not found' });
     }
 
     res.json({
       success: true,
-      market: { id: marketId, ...match }
+      market: { id: marketId, ...market }
     });
   } catch (error) {
     console.error('❌ Error fetching market:', error);
     res.status(500).json({ error: 'Failed to fetch market' });
+  }
+});
+
+// ========== BETTING ROUTES ==========
+app.post('/api/bets/place', async (req, res) => {
+  try {
+    console.log('🎯 PLACE BET REQUEST:', req.body);
+    const { userId, marketId, outcome, amount } = req.body;
+
+    if (!userId || !marketId || !outcome || !amount) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'Missing required fields: userId, marketId, outcome, amount' 
+      });
+    }
+
+    if (amount <= 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'Bet amount must be greater than 0'
+      });
+    }
+
+    const result = await placeBet(userId, marketId, outcome, amount);
+    
+    if (result.success) {
+      res.json({
+        success: true,
+        message: 'Bet placed successfully',
+        betId: result.betId
+      });
+    } else {
+      res.status(400).json({
+        success: false,
+        error: result.error
+      });
+    }
+
+  } catch (error) {
+    console.error('💥 BET PLACEMENT ERROR:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to place bet: ' + error.message
+    });
+  }
+});
+
+app.get('/api/users/:userId/balance', async (req, res) => {
+  try {
+    const { userId } = req.params;
+    
+    if (!userId) {
+      return res.status(400).json({ error: 'User ID is required' });
+    }
+
+    const balanceInfo = await getUserBalance(userId);
+    
+    res.json({
+      success: true,
+      balance: balanceInfo.balance,
+      lockedBalance: balanceInfo.lockedBalance,
+      availableBalance: balanceInfo.availableBalance,
+      totalWagered: balanceInfo.totalWagered,
+      totalWon: balanceInfo.totalWon
+    });
+
+  } catch (error) {
+    console.error('💥 BALANCE FETCH ERROR:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch balance: ' + error.message
+    });
+  }
+});
+
+// ========== ADMIN ROUTES ==========
+app.post('/api/admin/resolve-market', async (req, res) => {
+  try {
+    const { adminId, marketId, result } = req.body;
+
+    if (!adminId || !marketId || !result) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing required fields: adminId, marketId, result'
+      });
+    }
+
+    const resolutionResult = await resolveMarket(adminId, marketId, result);
+    
+    if (resolutionResult.success) {
+      res.json({
+        success: true,
+        message: resolutionResult.message
+      });
+    } else {
+      res.status(400).json({
+        success: false,
+        error: resolutionResult.error
+      });
+    }
+
+  } catch (error) {
+    console.error('💥 MARKET RESOLUTION ERROR:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to resolve market: ' + error.message
+    });
+  }
+});
+
+app.post('/api/admin/freeze-market', async (req, res) => {
+  try {
+    const { adminId, marketId, freeze } = req.body;
+
+    if (!adminId || !marketId) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing required fields: adminId, marketId'
+      });
+    }
+
+    const freezeResult = await setMarketFreeze(adminId, marketId, freeze);
+    
+    if (freezeResult.success) {
+      res.json({
+        success: true,
+        message: freezeResult.message
+      });
+    } else {
+      res.status(400).json({
+        success: false,
+        error: freezeResult.error
+      });
+    }
+
+  } catch (error) {
+    console.error('💥 MARKET FREEZE ERROR:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to freeze market: ' + error.message
+    });
   }
 });
 
@@ -385,4 +530,5 @@ app.listen(PORT, () => {
   console.log(`🚀 TrendBet Server running on port ${PORT}`);
   console.log(`🔥 Firebase Status: ${db ? '✅ Connected' : '❌ Disconnected'}`);
   console.log(`📧 AUTH: Email-only authentication`);
+  console.log(`🎯 BETTING: Bet routes enabled`);
 });
