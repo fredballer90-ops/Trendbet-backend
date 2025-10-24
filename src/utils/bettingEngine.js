@@ -1,8 +1,8 @@
-const admin = require("firebase-admin");
+import admin from "../config/firebase.js";
 const db = admin.database();
 
 // ==================== PLACE BET ====================
-const placeBet = async (userId, marketId, outcome, amount) => {
+export const placeBet = async (userId, marketId, outcome, amount) => {
   try {
     console.log(`🎯 Placing bet: user=${userId}, market=${marketId}, outcome=${outcome}, amount=${amount}`);
     
@@ -94,7 +94,7 @@ const formatVolume = (volume) => {
 };
 
 // ==================== GET USER BALANCE ====================
-const getUserBalance = async (userId) => {
+export const getUserBalance = async (userId) => {
   try {
     const userRef = db.ref(`users/${userId}`);
     const snapshot = await userRef.get();
@@ -126,7 +126,7 @@ const getUserBalance = async (userId) => {
 };
 
 // ==================== ADMIN: RESOLVE MARKET ====================
-const resolveMarket = async (adminId, marketId, result) => {
+export const resolveMarket = async (adminId, marketId, result) => {
   try {
     const adminRef = db.ref(`admins/${adminId}`);
     const adminSnapshot = await adminRef.get();
@@ -174,7 +174,7 @@ const resolveMarket = async (adminId, marketId, result) => {
 };
 
 // ==================== ADMIN: FREEZE/UNFREEZE MARKET ====================
-const setMarketFreeze = async (adminId, marketId, freeze = true) => {
+export const setMarketFreeze = async (adminId, marketId, freeze = true) => {
   try {
     if (!adminId || !marketId) throw new Error("Missing parameters");
 
@@ -202,17 +202,11 @@ const setMarketFreeze = async (adminId, marketId, freeze = true) => {
 };
 
 // ==================== ADMIN: FREEZE + RESOLVE SHORTCUT ====================
-const freezeAndResolve = async (adminId, marketId, result) => {
+export const freezeAndResolve = async (adminId, marketId, result) => {
   const freezeRes = await setMarketFreeze(adminId, marketId, true);
   if (!freezeRes.success) return freezeRes;
   return await resolveMarket(adminId, marketId, result);
 };
 
-module.exports = {
-  placeBet,
-  getUserBalance,
-  resolveMarket,
-  setMarketFreeze,
-  freezeAndResolve,
-  formatVolume,
-};
+// Export formatVolume if needed elsewhere
+export { formatVolume };
