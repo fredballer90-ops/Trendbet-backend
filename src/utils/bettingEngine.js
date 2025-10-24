@@ -53,9 +53,13 @@ export const placeBet = async (userId, marketId, outcome, amount) => {
     );
     
     // Update market pool
-    batch.push(
-      db.ref(`markets/${marketId}/pool/${outcome}`).set((market.pool[outcome] || 0) + amount)
-    );
+
+// In placeBet, only:
+db.ref(`bets/${betId}`).set({...});
+db.ref(`users/${userId}/lockedBalance`).set(...);
+db.ref(`users/${userId}/totalWagered`).set(...);
+
+// Market pool updated by server/admin only,
     
     // Create bet entry
     batch.push(
