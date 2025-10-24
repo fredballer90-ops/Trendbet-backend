@@ -181,6 +181,54 @@ app.post('/api/auth/verify-registration-otp', (req, res) => {
 });
 
 app.post('/api/otp/resend', (req, res) => {
+
+// ---------- ADMIN ROUTES ----------
+app.post('/api/admin/user-balance', (req, res) => {
+  try {
+    const { userId, amount } = req.body;
+    
+    // Find user
+    const user = memoryDB.users.find(u => u.id === userId);
+    if (!user) {
+      return res.status(404).json({ success: false, error: 'User not found' });
+    }
+    
+    // Update balance
+    user.balance += parseFloat(amount);
+    
+    console.log(`💰 Balance updated: User ${userId} +${amount} = ${user.balance}`);
+    
+    res.json({
+      success: true,
+      message: `Added ${amount} to user balance`,
+      newBalance: user.balance
+    });
+  } catch (error) {
+    console.error('Balance update error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Admin check endpoint
+app.get('/api/admin/check', (req, res) => {
+  res.json({ isAdmin: true });
+});
+
+// Get all users with details
+app.get('/api/admin/users', (req, res) => {
+  res.json({
+    success: true,
+    users: memoryDB.users.map(u => ({
+      id: u.id,
+      name: u.name,
+      phone: u.phone,
+      email: u.email,
+      balance: u.balance,
+      role: u.role,
+      createdAt: u.createdAt
+    }))
+  });
+});
   try {
     const { emailOrPhone, type } = req.body;
     if (!emailOrPhone || !type) return res.status(400).json({ error: 'Phone/Email and type are required' });
@@ -491,13 +539,6 @@ app.get('/api/debug/users', (req, res) => {
     })), 
     otps: memoryDB.otps, 
     currentTime: Date.now() 
-  });
-});
-
-app.get('/api/debug/bets', (req, res) => {
-  return res.json({
-    bets: memoryDB.bets,
-    totalBets: memoryDB.bets.length
   });
 });
 
