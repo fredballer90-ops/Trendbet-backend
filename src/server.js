@@ -536,6 +536,29 @@ app.get('/api/debug/users', (req, res) => {
       email: u.email,
       balance: u.balance,
       role: u.role
+
+// Temporary route to make user admin
+app.post('/api/dev/make-admin', (req, res) => {
+  const { userId } = req.body;
+  
+  const user = memoryDB.users.find(u => u.id === userId);
+  if (!user) {
+    return res.status(404).json({ success: false, error: 'User not found' });
+  }
+  
+  user.role = 'admin';
+  
+  res.json({
+    success: true,
+    message: 'User is now admin',
+    user: {
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      role: user.role
+    }
+  });
+});
     })), 
     otps: memoryDB.otps, 
     currentTime: Date.now() 
