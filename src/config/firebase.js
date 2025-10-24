@@ -2,33 +2,36 @@ import admin from 'firebase-admin';
 
 let firebaseAdmin = null;
 
-if (!process.env.FIREBASE_SERVICE_ACCOUNT_KEY || !process.env.FIREBASE_PRIVATE_KEY) {
-  console.log('⚠️  Firebase credentials not found - running without Firebase');
-} else {
-  try {
-    const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_KEY);
-    const privateKeyBase64 = process.env.FIREBASE_PRIVATE_KEY;
-    const privateKey = Buffer.from(privateKeyBase64, 'base64').toString('utf-8');
-    serviceAccount.private_key = privateKey;
-    
-    console.log('🔑 Private key starts with:', privateKey.substring(0, 30));
-    
-    if (!serviceAccount.private_key.includes('BEGIN PRIVATE KEY')) {
-      throw new Error('Private key does not appear to be valid PEM format');
-    }
-    
-    if (!admin.apps.length) {
-      admin.initializeApp({
-        credential: admin.credential.cert(serviceAccount),
-        databaseURL: "https://trendbet-55be5-default-rtdb.firebaseio.com"
-      });
-      console.log('✅ Firebase Admin initialized successfully');
-      firebaseAdmin = admin;
-    }
-  } catch (error) {
-    console.error('❌ Firebase initialization failed:', error.message);
-    console.log('🔄 Running without Firebase');
+try {
+  // For Render.com - use service account key file or individual environment variables
+  const serviceAccount = {
+    type: "service_account",
+    project_id: process.env.FIREBASE_PROJECT_ID || "trendbet-55be5",
+    private_key_id: process.env.FIREBASE_PRIVATE_KEY_ID,
+    private_key: process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n'),
+    client_email: process.env.FIREBASE_CLIENT_EMAIL,
+    client_id: process.env.FIREBASE_CLIENT_ID,
+    auth_uri: "https://accounts.google.com/o/oauth2/auth",
+    token_uri: "https://oauth2.googleapis.com/token",
+    auth_provider_x509_cert_url: "https://www.googleapis.com/oauth2/v1/certs",
+    client_x509_cert_url: process.env.FIREBASE_CLIENT_CERT_URL,
+    universe_domain: "googleapis.com"
+  };
+
+  // Check if we have the minimum required fields
+  if (serviceAccount.private_key && serviceAccount.client_email) {
+    admin.initializeApp({
+      credential: admin.credential.cert(serviceAccount),
+      databaseURL: "https://trendbet-55be5-default-rtdb.firebaseio.com"
+    });
+    firebaseAdmin = admin;
+    console.log('✅ Firebase Admin initialized successfully');
+  } else {
+    console.log('⚠️  Firebase credentials missing - running without Firebase');
   }
+} catch (error) {
+  console.error('❌ Firebase initialization failed:', error.message);
+  console.log('🔄 Running without Firebase');
 }
 
 export default firebaseAdmin;

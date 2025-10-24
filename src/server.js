@@ -1,61 +1,67 @@
 import express from "express";
 import cors from "cors";
 import admin from "./config/firebase.js";
+
 const app = express();
 
 app.use(cors({
-  origin: ['http://localhost:3000', 'http://127.0.0.1:3000', 'http://192.168.2.100:3000'],
+  origin: ['http://localhost:3000', 'http://127.0.0.1:3000', 'http://192.168.2.100:3000', 'https://your-frontend.onrender.com'],
   credentials: true
 }));
 app.use(express.json());
 
-const db = admin.database();
+const db = admin ? admin.database() : null;
 
-// Request logging middleware
+// Request logging
 app.use((req, res, next) => {
-  try {
-    console.log(`📨 ${req.method} ${req.path}`, {
-      body: req.body,
-      ip: req.ip,
-      hostname: req.hostname
-    });
-  } catch (e) { /* ignore logging errors */ }
+  console.log(`📨 ${req.method} ${req.path}`, {
+    body: req.body,
+    hostname: req.hostname
+  });
   next();
 });
 
 // Firebase helper functions
 const firebaseHelpers = {
-  // Get user by email
   async getUserByEmail(email) {
+    if (!db) throw new Error('Firebase not initialized');
+    
     try {
       const usersRef = db.ref('users');
       const snapshot = await usersRef.orderByChild('email').equalTo(email.toLowerCase()).once('value');
       const users = snapshot.val();
-      return users ? Object.values(users)[0] : null;
-    } catch (error) {
-      console.error('Firebase error:', error);
+      if (users) {
+        const userId = Object.keys(users)[0];
+        return { ...users[userId], id: userId };
+      }
       return null;
+    } catch (error) {
+      console.error('Firebase getUserByEmail error:', error);
+      throw error;
     }
   },
 
-  // Create user
   async createUser(userData) {
+    if (!db) throw new Error('Firebase not initialized');
+    
     try {
       const usersRef = db.ref('users');
       const newUserRef = usersRef.push();
       await newUserRef.set({
         ...userData,
-        id: newUserRef.key,
-        createdAt: new Date().toISOString()
+        createdAt: new Date().toISOString(),
+        emailVerified: false
       });
       return { ...userData, id: newUserRef.key };
     } catch (error) {
+      console.error('Firebase createUser error:', error);
       throw error;
     }
   },
 
-  // Store OTP
   async storeOTP(email, otpCode, type) {
+    if (!db) throw new Error('Firebase not initialized');
+    
     try {
       const otpRef = db.ref('otps').push();
       await otpRef.set({
@@ -66,12 +72,14 @@ const firebaseHelpers = {
         createdAt: new Date().toISOString()
       });
     } catch (error) {
+      console.error('Firebase storeOTP error:', error);
       throw error;
     }
   },
 
-  // Verify OTP
   async verifyOTP(email, otpCode, type) {
+    if (!db) throw new Error('Firebase not initialized');
+    
     try {
       const otpsRef = db.ref('otps');
       const snapshot = await otpsRef.orderByChild('email').equalTo(email.toLowerCase()).once('value');
@@ -88,62 +96,86 @@ const firebaseHelpers = {
       }
       return false;
     } catch (error) {
-      console.error('OTP verification error:', error);
-      return false;
+      console.error('Firebase verifyOTP error:', error);
+      throw error;
     }
   },
 
-  // Get user by ID
   async getUserById(userId) {
+    if (!db) throw new Error('Firebase not initialized');
+    
     try {
       const userRef = db.ref(`users/${userId}`);
       const snapshot = await userRef.once('value');
-      return snapshot.val();
+      const user = snapshot.val();
+      return user ? { ...user, id: userId } : null;
     } catch (error) {
       console.error('Firebase getUserById error:', error);
-      return null;
+      throw error;
     }
   }
 };
 
 // ---------- HEALTH ----------
-app.get('/api/health', (req, res) => {
-  res.json({
-    status: 'OK',
-    message: 'TrendBet API with Firebase Auth is running!',
-    database: 'Firebase Realtime Database',
-    timestamp: new Date().toISOString(),
-    clientIP: req.ip
-  });
+app.get('/api/health', async (req, res) => {
+  try {
+    let userCount = 0;
+    if (db) {
+      const usersRef = db.ref('users');
+      const snapshot = await usersRef.once('value');
+      userCount = snapshot.numChildren();
+    }
+
+    res.json({
+      status: 'OK',
+      message: 'TrendBet API with Firebase RTDB is running!',
+      database: db ? 'Firebase Realtime Database' : 'No Database',
+      usersCount: userCount,
+      firebaseStatus: db ? '✅ Connected' : '❌ Disconnected',
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    res.json({
+      status: 'OK',
+      message: 'TrendBet API is running (Firebase error)',
+      database: 'Firebase (Connection Issue)',
+      firebaseStatus: '❌ Connection Error',
+      timestamp: new Date().toISOString()
+    });
+  }
 });
 
 // ---------- AUTH (EMAIL-ONLY with FIREBASE) ----------
 app.post('/api/auth/register', async (req, res) => {
   try {
-    console.log('📧 REGISTRATION REQUEST:', JSON.stringify(req.body, null, 2));
+    console.log('📧 REGISTRATION REQUEST:', req.body);
     const { name, email, password } = req.body;
 
     if (!name || !email || !password) {
       return res.status(400).json({ error: 'All fields are required' });
     }
 
-    // Validate email format
+    // Validate email
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(email)) {
-      return res.status(400).json({ error: 'Please enter a valid email address' });
+      return res.status(400).json({ error: 'Invalid email format' });
     }
 
-    // Check if user already exists by email in Firebase
+    if (!db) {
+      return res.status(500).json({ error: 'Database not available' });
+    }
+
+    // Check if user exists
     const existingUser = await firebaseHelpers.getUserByEmail(email);
     if (existingUser) {
       return res.status(400).json({ error: 'User with this email already exists' });
     }
 
-    // Create user in Firebase
+    // Create user
     const user = await firebaseHelpers.createUser({
       name,
       email: email.toLowerCase(),
-      password, // Note: In production, you should hash this!
+      password, // Note: Hash this in production!
       balance: 1000,
       totalWagered: 0,
       totalWinnings: 0,
@@ -151,7 +183,7 @@ app.post('/api/auth/register', async (req, res) => {
       emailVerified: false
     });
 
-    // Generate OTP for email verification
+    // Generate OTP
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
     await firebaseHelpers.storeOTP(email, otp, 'registration');
 
@@ -167,31 +199,38 @@ app.post('/api/auth/register', async (req, res) => {
 
   } catch (error) {
     console.error('💥 REGISTRATION ERROR:', error);
-    return res.status(500).json({ success: false, error: 'Internal server error during registration' });
+    return res.status(500).json({ error: 'Registration failed: ' + error.message });
   }
 });
 
 app.post('/api/auth/login', async (req, res) => {
   try {
-    console.log('🔐 LOGIN REQUEST:', JSON.stringify(req.body, null, 2));
+    console.log('🔐 LOGIN REQUEST:', req.body);
     const { identifier, password } = req.body;
 
     if (!identifier || !password) {
-      return res.status(400).json({ success: false, error: 'Email and password are required' });
+      return res.status(400).json({ error: 'Email and password are required' });
+    }
+
+    if (!db) {
+      return res.status(500).json({ error: 'Database not available' });
     }
 
     const cleanEmail = identifier.toLowerCase().trim();
-    
-    // Find user in Firebase
     const user = await firebaseHelpers.getUserByEmail(cleanEmail);
-    if (!user) return res.status(401).json({ success: false, error: 'User not found' });
-    
-    // Check password (in production, use hashing!)
-    if (user.password !== password) {
-      return res.status(401).json({ success: false, error: 'Invalid password' });
+
+    if (!user) {
+      console.log('❌ User not found:', cleanEmail);
+      return res.status(401).json({ error: 'User not found' });
     }
 
-    // Generate OTP for email verification
+    // Check password (hash in production!)
+    if (user.password !== password) {
+      console.log('❌ Invalid password for:', cleanEmail);
+      return res.status(401).json({ error: 'Invalid password' });
+    }
+
+    // Generate OTP
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
     await firebaseHelpers.storeOTP(user.email, otp, 'login');
 
@@ -206,141 +245,15 @@ app.post('/api/auth/login', async (req, res) => {
 
   } catch (error) {
     console.error('💥 LOGIN ERROR:', error);
-    return res.status(500).json({ success: false, error: 'Internal server error during login' });
+    return res.status(500).json({ error: 'Login failed: ' + error.message });
   }
 });
 
-app.post('/api/auth/verify-login-otp', async (req, res) => {
-  try {
-    const { email, otpCode } = req.body;
-    const cleanEmail = email.toLowerCase().trim();
+// Add your other routes (OTP verification, bets, etc.) here...
 
-    // Verify OTP in Firebase
-    const isValid = await firebaseHelpers.verifyOTP(cleanEmail, otpCode, 'login');
-    if (!isValid) {
-      return res.status(400).json({ success: false, error: 'Invalid or expired OTP' });
-    }
-
-    // Get user from Firebase
-    const user = await firebaseHelpers.getUserByEmail(cleanEmail);
-    if (!user) return res.status(400).json({ success: false, error: 'User not found' });
-
-    const token = `token-${Date.now()}-${user.id}`;
-
-    return res.json({
-      success: true,
-      token,
-      user: {
-        id: user.id,
-        name: user.name,
-        email: user.email,
-        balance: user.balance,
-        role: user.role
-      }
-    });
-
-  } catch (error) {
-    console.error('💥 OTP VERIFICATION ERROR:', error);
-    return res.status(500).json({ success: false, error: 'Internal server error during OTP verification' });
-  }
-});
-
-app.post('/api/auth/verify-registration-otp', async (req, res) => {
-  try {
-    const { email, otpCode, userId } = req.body;
-    const cleanEmail = email.toLowerCase().trim();
-
-    // Verify OTP in Firebase
-    const isValid = await firebaseHelpers.verifyOTP(cleanEmail, otpCode, 'registration');
-    if (!isValid) {
-      return res.status(400).json({ success: false, error: 'Invalid or expired OTP' });
-    }
-
-    // Update user as verified in Firebase
-    await db.ref(`users/${userId}`).update({ emailVerified: true });
-    
-    // Get updated user
-    const user = await firebaseHelpers.getUserById(userId);
-    if (!user) return res.status(400).json({ success: false, error: 'User not found' });
-
-    const token = `token-${Date.now()}-${user.id}`;
-
-    return res.json({
-      success: true,
-      token,
-      user: {
-        id: user.id,
-        name: user.name,
-        email: user.email,
-        balance: user.balance,
-        role: user.role
-      }
-    });
-
-  } catch (error) {
-    console.error('💥 REGISTRATION OTP ERROR:', error);
-    return res.status(500).json({ success: false, error: 'Internal server error during registration OTP verification' });
-  }
-});
-
-app.post('/api/otp/resend', async (req, res) => {
-  try {
-    const { email, type } = req.body;
-
-    if (!email || !type) return res.status(400).json({ error: 'Email and type are required' });
-
-    const cleanEmail = email.toLowerCase().trim();
-
-    // Generate new OTP
-    const otp = Math.floor(100000 + Math.random() * 900000).toString();
-    await firebaseHelpers.storeOTP(cleanEmail, otp, type);
-
-    console.log(`🔄 OTP resent for ${cleanEmail}: ${otp}`);
-
-    return res.json({
-      success: true,
-      message: 'OTP resent successfully',
-      debugCode: otp
-    });
-
-  } catch (error) {
-    console.error('💥 RESEND OTP ERROR:', error);
-    return res.status(500).json({ error: 'Failed to resend OTP' });
-  }
-});
-
-// Keep the rest of your routes (bets, admin, etc.) as they are...
-
-// ---------- DEBUG ----------
-app.get('/api/debug/users', async (req, res) => {
-  try {
-    const usersRef = db.ref('users');
-    const snapshot = await usersRef.once('value');
-    const users = snapshot.val() || {};
-    
-    return res.json({
-      users: Object.values(users),
-      totalUsers: Object.keys(users).length,
-      currentTime: Date.now()
-    });
-  } catch (error) {
-    return res.status(500).json({ error: error.message });
-  }
-});
-
-// Server start
 const PORT = process.env.PORT || 10000;
-const HOST = '0.0.0.0';
-
-app.get("/", (req, res) => res.status(200).send("✅ TrendBet backend with Firebase Auth is live"));
-
-const server = app.listen(PORT, HOST, () => {
-  console.log(`🚀 TrendBet Server running on http://${HOST}:${PORT}`);
-  console.log(`📊 Local: http://localhost:${PORT}/api/health`);
-  console.log(`🌐 Network: http://192.168.2.100:${PORT}/api/health`);
-  console.log(`🔥 Firebase: ✅ Enabled for Authentication`);
-  console.log(`📧 AUTH: Email-only authentication with Firebase`);
+app.listen(PORT, () => {
+  console.log(`🚀 TrendBet Server running on port ${PORT}`);
+  console.log(`🔥 Firebase Status: ${db ? '✅ Connected' : '❌ Disconnected'}`);
+  console.log(`📧 AUTH: Email-only authentication`);
 });
-
-server.keepAliveTimeout = 120000;
-server.headersTimeout = 120000;
