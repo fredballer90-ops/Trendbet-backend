@@ -55,7 +55,16 @@ export const placeBet = async (userId, marketId, outcome, amount) => {
     // Update market pool
 
 // In placeBet, only:
-db.ref(`bets/${betId}`).set({...});
+db.ref(`bets/${betId}`).set({
+  userId,
+  marketId,
+  outcome,
+  amount,
+  odds,
+  status: "pending",
+  placedAt: Date.now(),
+  potentialPayout: Math.round(amount * odds * 100) / 100
+});
 db.ref(`users/${userId}/lockedBalance`).set(...);
 db.ref(`users/${userId}/totalWagered`).set(...);
 
