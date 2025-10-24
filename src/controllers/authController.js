@@ -2,11 +2,19 @@ const User = require('../models/User');
 const OTP = require('../models/OTP');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
-const OTPService = require('../services/otpService');
+const { sendEmailOTP, generateOTP } = require('../services/emailService');
 
 exports.register = async (req, res) => {
   try {
-    const { email, phone, password, name } = req.body;
+    const { email, password, name } = req.body;
+
+    console.log('📧 Registration attempt:', { name, email });
+
+    // Validate email format
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+      return res.status(400).json({ error: 'Invalid email format' });
+    }
 
     // Validate password strength
     const passwordValidation = validatePassword(password);
@@ -16,92 +24,129 @@ exports.register = async (req, res) => {
       });
     }
 
-    // Check if user exists
-    const existingUser = await User.findOne({ 
-      $or: [{ email }, { phone }] 
-    });
-    
+    // Validate name
+    if (!name || name.trim().length < 2) {
+      return res.status(400).json({ error: 'Name is required and must be at least 2 characters long' });
+    }
+
+    // Check if user exists by email only
+    const existingUser = await User.findOne({ email: email.toLowerCase().trim() });
     if (existingUser) {
       return res.status(400).json({
-        error: 'User with this email or phone already exists'
+        error: 'User with this email already exists'
       });
     }
 
-    // Create user
+    // Create user with email only
     const user = await User.create({
-      name,
-      email,
-      phone,
+      name: name.trim(),
+      email: email.toLowerCase().trim(),
       password
     });
 
-    // Generate and send OTP for phone verification
-    const otp = await OTPService.generateOTP(phone, 'phone');
-    await OTPService.sendSMSOTP(phone, otp.code);
+    // Generate and send OTP to email
+    const otpCode = generateOTP();
+    console.log('📨 Sending registration OTP to email:', email, 'OTP:', otpCode);
+    
+    await sendEmailOTP(email, otpCode);
+
+    // Store OTP in database
+    await OTP.create({
+      email: email.toLowerCase().trim(),
+      code: otpCode,
+      type: 'registration',
+      expiresAt: new Date(Date.now() + 10 * 60 * 1000) // 10 minutes
+    });
 
     res.status(201).json({
-      message: 'User registered successfully. OTP sent to phone.',
+      message: 'User registered successfully. OTP sent to email.',
       userId: user._id,
       // Only in development - remove in production
-      ...(process.env.NODE_ENV === 'development' && { debugOtp: otp.code })
+      ...(process.env.NODE_ENV === 'development' && { debugOtp: otpCode })
     });
 
   } catch (error) {
+    console.error('❌ Registration error:', error);
     res.status(500).json({ error: error.message });
   }
 };
 
 exports.login = async (req, res) => {
   try {
-    const { identifier, password } = req.body; // identifier can be email or phone
-    
-    const user = await User.findOne({ 
-      $or: [{ email: identifier }, { phone: identifier }] 
-    });
-    
+    const { identifier, password } = req.body;
+
+    console.log('🔐 Login attempt:', { identifier });
+
+    // Find user by email only
+    const user = await User.findOne({ email: identifier.toLowerCase().trim() });
     if (!user) {
-      return res.status(401).json({ error: 'Invalid credentials' });
+      return res.status(401).json({ error: 'Invalid email or password' });
     }
 
     // Verify password
     const isPasswordValid = await bcrypt.compare(password, user.password);
     if (!isPasswordValid) {
-      return res.status(401).json({ error: 'Invalid credentials' });
+      return res.status(401).json({ error: 'Invalid email or password' });
     }
 
-    // Generate and send OTP for login verification
-    const otp = await OTPService.generateOTP(user.phone, 'phone');
-    await OTPService.sendSMSOTP(user.phone, otp.code);
+    // Generate and send OTP to email for login verification
+    const otpCode = generateOTP();
+    console.log('📨 Sending login OTP to email:', user.email, 'OTP:', otpCode);
+    
+    await sendEmailOTP(user.email, otpCode);
+
+    // Store OTP in database
+    await OTP.create({
+      email: user.email,
+      code: otpCode,
+      type: 'login',
+      expiresAt: new Date(Date.now() + 10 * 60 * 1000)
+    });
 
     res.json({
-      message: 'OTP sent to your phone for verification',
+      message: 'OTP sent to your email for verification',
       userId: user._id,
       requiresOtp: true,
       // Only in development - remove in production
-      ...(process.env.NODE_ENV === 'development' && { debugOtp: otp.code })
+      ...(process.env.NODE_ENV === 'development' && { debugOtp: otpCode })
     });
 
   } catch (error) {
+    console.error('❌ Login error:', error);
     res.status(500).json({ error: error.message });
   }
 };
 
 exports.verifyLoginOTP = async (req, res) => {
   try {
-    const { phone, otpCode } = req.body;
+    const { email, otpCode } = req.body;
 
-    const isValid = await OTPService.verifyOTP(phone, otpCode);
-    if (!isValid) {
+    console.log('✅ Verifying login OTP:', { email });
+
+    // Find valid OTP record
+    const otpRecord = await OTP.findOne({
+      email: email.toLowerCase().trim(),
+      code: otpCode,
+      type: 'login',
+      expiresAt: { $gt: new Date() }
+    });
+
+    if (!otpRecord) {
       return res.status(400).json({ error: 'Invalid or expired OTP' });
     }
 
-    // Get user and generate JWT token
-    const user = await User.findOne({ phone });
+    // Get user by email and generate JWT token
+    const user = await User.findOne({ email: email.toLowerCase().trim() });
     const token = jwt.sign(
-      { userId: user._id }, 
-      process.env.JWT_SECRET, 
+      { userId: user._id },
+      process.env.JWT_SECRET,
       { expiresIn: '7d' }
     );
+
+    // Mark OTP as verified and delete it
+    await OTP.deleteOne({ _id: otpRecord._id });
+
+    console.log('✅ Login successful for user:', user.email);
 
     res.json({
       token,
@@ -109,37 +154,51 @@ exports.verifyLoginOTP = async (req, res) => {
         id: user._id,
         name: user.name,
         email: user.email,
-        phone: user.phone,
         balance: user.balance,
         role: user.role
       }
     });
 
   } catch (error) {
+    console.error('❌ Login OTP verification error:', error);
     res.status(500).json({ error: error.message });
   }
 };
 
 exports.verifyRegistrationOTP = async (req, res) => {
   try {
-    const { phone, otpCode, userId } = req.body;
+    const { email, otpCode, userId } = req.body;
 
-    const isValid = await OTPService.verifyOTP(phone, otpCode);
-    if (!isValid) {
+    console.log('✅ Verifying registration OTP:', { email, userId });
+
+    // Find valid OTP record
+    const otpRecord = await OTP.findOne({
+      email: email.toLowerCase().trim(),
+      code: otpCode,
+      type: 'registration',
+      expiresAt: { $gt: new Date() }
+    });
+
+    if (!otpRecord) {
       return res.status(400).json({ error: 'Invalid or expired OTP' });
     }
 
     // Update user as verified and generate JWT
-    await User.findByIdAndUpdate(userId, { 
-      phoneVerified: true 
+    await User.findByIdAndUpdate(userId, {
+      emailVerified: true
     });
 
     const user = await User.findById(userId);
     const token = jwt.sign(
-      { userId: user._id }, 
-      process.env.JWT_SECRET, 
+      { userId: user._id },
+      process.env.JWT_SECRET,
       { expiresIn: '7d' }
     );
+
+    // Mark OTP as verified and delete it
+    await OTP.deleteOne({ _id: otpRecord._id });
+
+    console.log('✅ Registration verified for user:', user.email);
 
     res.json({
       token,
@@ -147,13 +206,13 @@ exports.verifyRegistrationOTP = async (req, res) => {
         id: user._id,
         name: user.name,
         email: user.email,
-        phone: user.phone,
         balance: user.balance,
         role: user.role
       }
     });
 
   } catch (error) {
+    console.error('❌ Registration OTP verification error:', error);
     res.status(500).json({ error: error.message });
   }
 };
@@ -165,7 +224,7 @@ function validatePassword(password) {
   const hasLowerCase = /[a-z]/.test(password);
   const hasNumbers = /\d/.test(password);
   const hasSpecialChar = /[!@#$%^&*(),.?":{}|<>]/.test(password);
-  
+
   if (password.length < minLength) {
     return { valid: false, error: 'Password must be at least 8 characters long' };
   }
@@ -181,6 +240,6 @@ function validatePassword(password) {
   if (!hasSpecialChar) {
     return { valid: false, error: 'Password must contain at least one special character' };
   }
-  
+
   return { valid: true };
 }
