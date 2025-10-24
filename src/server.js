@@ -196,7 +196,7 @@ app.get('/api/markets', async (req, res) => {
       return res.status(500).json({ error: 'Database not available' });
     }
 
-    const matchesRef = db.ref('matches');
+    const matchesRef = db.ref('markets');
     const snapshot = await matchesRef.orderByChild('status').equalTo('active').once('value');
     const matches = snapshot.val() || {};
 
