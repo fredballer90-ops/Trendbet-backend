@@ -1,110 +1,77 @@
 import admin from "../config/firebase.js";
 const db = admin.database();
 
-// ==================== PLACE BET ====================
+/**
+ * ==================== PLACE BET ====================
+ * Locks user's funds, creates a bet entry.
+ */
 export const placeBet = async (userId, marketId, outcome, amount) => {
   try {
     console.log(`🎯 Placing bet:`, { userId, marketId, outcome, amount });
-    
+
     // Get user and market data
     const [userSnap, marketSnap] = await Promise.all([
-      db.ref(`users/${userId}`).once('value'),
-      db.ref(`markets/${marketId}`).once('value')
+      db.ref(`users/${userId}`).once("value"),
+      db.ref(`markets/${marketId}`).once("value")
     ]);
-    
+
     const user = userSnap.val();
     const market = marketSnap.val();
 
-    // Validations
+    // --- Validations ---
     if (!user) return { success: false, error: "User not found" };
     if (!market) return { success: false, error: "Market not found" };
+    if (market.status !== "active") return { success: false, error: "Market is not active" };
 
     const availableBalance = (user.balance || 0) - (user.lockedBalance || 0);
-    if (availableBalance < amount) {
-      return { success: false, error: "Insufficient funds" };
-    }
+    if (availableBalance < amount) return { success: false, error: "Insufficient funds" };
 
-    if (market.status !== "active") {
-      return { success: false, error: "Market is not active" };
-    }
-
-    // Calculate odds
+    // --- Calculate odds ---
     if (!market.pool) market.pool = { YES: 0, NO: 0 };
     const totalPool = (market.pool.YES || 0) + (market.pool.NO || 0);
     const outcomePool = market.pool[outcome] || 0;
     const probability = totalPool > 0 ? outcomePool / totalPool : 0.5;
-    const houseProbability = probability * 1.05;
-    const odds = Math.max(1.01, Math.round((1 / (houseProbability || 0.5)) * 100) / 100);
+    const houseProbability = Math.min(0.99, probability * 1.05);
+    const odds = Math.max(1.01, Math.round((1 / houseProbability) * 100) / 100);
 
-    // Create bet ID
+    // --- Create bet ID ---
     const betId = `bet_${Date.now()}_${userId}`;
 
-    // ✅ SAFE: Update each path individually instead of using updates object
-    const batch = [];
-    
-    // Update user locked balance
-    batch.push(
-      db.ref(`users/${userId}/lockedBalance`).set((user.lockedBalance || 0) + amount)
-    );
-    
-    // Update user total wagered
-    batch.push(
-      db.ref(`users/${userId}/totalWagered`).set((user.totalWagered || 0) + amount)
-    );
-    
-    // Update market pool
+    // --- Apply updates safely ---
+    const updates = {};
+    updates[`users/${userId}/lockedBalance`] = (user.lockedBalance || 0) + amount;
+    updates[`users/${userId}/totalWagered`] = (user.totalWagered || 0) + amount;
+    updates[`bets/${betId}`] = {
+      userId,
+      marketId,
+      outcome,
+      amount,
+      odds,
+      status: "pending",
+      placedAt: Date.now(),
+      potentialPayout: Math.round(amount * odds * 100) / 100
+    };
 
-// In placeBet, only:
-db.ref(`bets/${betId}`).set({
-  userId,
-  marketId,
-  outcome,
-  amount,
-  odds,
-  status: "pending",
-  placedAt: Date.now(),
-  potentialPayout: Math.round(amount * odds * 100) / 100
-});
-db.ref(`users/${userId}/lockedBalance`).set(...);
-db.ref(`users/${userId}/totalWagered`).set(...);
-
-// Market pool updated by server/admin only,
-    
-    // Create bet entry
-    batch.push(
-      db.ref(`bets/${betId}`).set({
-        userId,
-        marketId,
-        outcome,
-        amount,
-        odds,
-        status: "pending",
-        placedAt: Date.now(),
-        potentialPayout: Math.round(amount * odds * 100) / 100,
-      })
-    );
-
-    // Execute all updates
-    await Promise.all(batch);
+    await db.ref().update(updates);
 
     console.log(`✅ Bet placed successfully: ${betId}`);
     return { success: true, betId };
-
   } catch (error) {
     console.error("❌ Bet placement error:", error);
     return { success: false, error: error.message };
   }
 };
 
-// ==================== GET USER BALANCE ====================
+/**
+ * ==================== GET USER BALANCE ====================
+ */
 export const getUserBalance = async (userId) => {
   try {
     const userRef = db.ref(`users/${userId}`);
-    const snapshot = await userRef.once('value');
+    const snapshot = await userRef.once("value");
     const userData = snapshot.val();
 
     if (!userData) {
-      // Create user with default balance if doesn't exist
       const defaultData = {
         balance: 10000,
         lockedBalance: 0,
@@ -129,61 +96,64 @@ export const getUserBalance = async (userId) => {
   }
 };
 
-// ==================== ADMIN: RESOLVE MARKET ====================
+/**
+ * ==================== ADMIN: RESOLVE MARKET ====================
+ * Unlocks funds and pays winners.
+ */
 export const resolveMarket = async (adminId, marketId, result) => {
   try {
     // Verify admin
-    const adminSnap = await db.ref(`admins/${adminId}`).once('value');
+    const adminSnap = await db.ref(`admins/${adminId}`).once("value");
     if (!adminSnap.exists() || adminSnap.val() !== true) {
       throw new Error("Admin access required");
     }
 
-    // Get all pending bets for this market
-    const betsSnap = await db.ref("bets").once('value');
+    const betsSnap = await db.ref("bets").once("value");
     const bets = betsSnap.val();
-    const batch = [];
+    const updates = {};
 
     if (bets) {
       Object.keys(bets).forEach((betId) => {
         const bet = bets[betId];
         if (bet.marketId === marketId && bet.status === "pending") {
-          if (bet.outcome === result) {
-            // User won
-            const payout = bet.amount * bet.odds;
-            batch.push(db.ref(`users/${bet.userId}/balance`).set(payout));
-            batch.push(db.ref(`users/${bet.userId}/lockedBalance`).set(-bet.amount));
-            batch.push(db.ref(`users/${bet.userId}/totalWon`).set(payout - bet.amount));
-            batch.push(db.ref(`bets/${betId}/status`).set("won"));
-            batch.push(db.ref(`bets/${betId}/payout`).set(payout));
-          } else {
-            // User lost
-            batch.push(db.ref(`users/${bet.userId}/lockedBalance`).set(-bet.amount));
-            batch.push(db.ref(`bets/${betId}/status`).set("lost"));
+          const won = bet.outcome === result;
+          const payout = won ? bet.amount * bet.odds : 0;
+
+          // Update user balances safely
+          updates[`users/${bet.userId}/lockedBalance`] = admin.database.ServerValue.increment(-bet.amount);
+          if (won) {
+            updates[`users/${bet.userId}/balance`] = admin.database.ServerValue.increment(payout);
+            updates[`users/${bet.userId}/totalWon`] = admin.database.ServerValue.increment(payout - bet.amount);
           }
-          batch.push(db.ref(`bets/${betId}/resolvedAt`).set(Date.now()));
+
+          // Update bet status
+          updates[`bets/${betId}/status`] = won ? "won" : "lost";
+          updates[`bets/${betId}/payout`] = payout;
+          updates[`bets/${betId}/resolvedAt`] = Date.now();
         }
       });
     }
 
-    // Update market status
-    batch.push(db.ref(`markets/${marketId}/status`).set("resolved"));
-    batch.push(db.ref(`markets/${marketId}/result`).set(result));
-    batch.push(db.ref(`markets/${marketId}/resolvedAt`).set(Date.now()));
+    updates[`markets/${marketId}/status`] = "resolved";
+    updates[`markets/${marketId}/result`] = result;
+    updates[`markets/${marketId}/resolvedAt`] = Date.now();
 
-    await Promise.all(batch);
+    await db.ref().update(updates);
+    console.log(`✅ Market ${marketId} resolved with result: ${result}`);
+
     return { success: true, message: "Market resolved successfully" };
-
   } catch (error) {
     console.error("Market resolution error:", error);
     return { success: false, error: error.message };
   }
 };
 
-// ==================== ADMIN: FREEZE/UNFREEZE MARKET ====================
+/**
+ * ==================== ADMIN: FREEZE/UNFREEZE MARKET ====================
+ */
 export const setMarketFreeze = async (adminId, marketId, freeze = true) => {
   try {
-    // Verify admin
-    const adminSnap = await db.ref(`admins/${adminId}`).once('value');
+    const adminSnap = await db.ref(`admins/${adminId}`).once("value");
     if (!adminSnap.exists() || adminSnap.val() !== true) {
       throw new Error("Admin access required");
     }
@@ -196,25 +166,26 @@ export const setMarketFreeze = async (adminId, marketId, freeze = true) => {
     });
 
     return { success: true, message: `Market ${freeze ? "frozen" : "unfrozen"} successfully` };
-
   } catch (error) {
     console.error("Freeze/unfreeze error:", error);
     return { success: false, error: error.message };
   }
 };
 
-// ==================== ADMIN: FREEZE + RESOLVE SHORTCUT ====================
+/**
+ * ==================== ADMIN: FREEZE + RESOLVE SHORTCUT ====================
+ */
 export const freezeAndResolve = async (adminId, marketId, result) => {
   const freezeRes = await setMarketFreeze(adminId, marketId, true);
   if (!freezeRes.success) return freezeRes;
   return await resolveMarket(adminId, marketId, result);
 };
 
-// Utility function
-const formatVolume = (volume) => {
+/**
+ * ==================== HELPER: FORMAT VOLUME ====================
+ */
+export const formatVolume = (volume) => {
   if (volume >= 1000000) return (volume / 1000000).toFixed(1) + "M";
   if (volume >= 1000) return (volume / 1000).toFixed(1) + "K";
   return volume.toString();
 };
-
-export { formatVolume };
