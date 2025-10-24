@@ -5,7 +5,14 @@ import admin from "./config/firebase.js";
 const app = express();
 
 app.use(cors({
-  origin: ['http://localhost:3000', 'http://127.0.0.1:3000', 'http://192.168.2.100:3000', 'https://your-frontend.onrender.com'],
+  origin: [
+    'http://localhost:3000',
+    'http://127.0.0.1:3000',
+    'http://192.168.2.100:3000',
+    'http://localhost:5173',
+    'https://trendbet.onrender.com',
+    'https://your-frontend.onrender.com'
+  ],
   credentials: true
 }));
 app.use(express.json());
@@ -25,7 +32,7 @@ app.use((req, res, next) => {
 const firebaseHelpers = {
   async getUserByEmail(email) {
     if (!db) throw new Error('Firebase not initialized');
-    
+
     try {
       const usersRef = db.ref('users');
       const snapshot = await usersRef.orderByChild('email').equalTo(email.toLowerCase()).once('value');
@@ -43,7 +50,7 @@ const firebaseHelpers = {
 
   async createUser(userData) {
     if (!db) throw new Error('Firebase not initialized');
-    
+
     try {
       const usersRef = db.ref('users');
       const newUserRef = usersRef.push();
@@ -61,7 +68,7 @@ const firebaseHelpers = {
 
   async storeOTP(email, otpCode, type) {
     if (!db) throw new Error('Firebase not initialized');
-    
+
     try {
       const otpRef = db.ref('otps').push();
       await otpRef.set({
@@ -79,17 +86,16 @@ const firebaseHelpers = {
 
   async verifyOTP(email, otpCode, type) {
     if (!db) throw new Error('Firebase not initialized');
-    
+
     try {
       const otpsRef = db.ref('otps');
       const snapshot = await otpsRef.orderByChild('email').equalTo(email.toLowerCase()).once('value');
       const otps = snapshot.val();
-      
+
       if (!otps) return false;
 
       for (const [key, otp] of Object.entries(otps)) {
         if (otp.code === otpCode && otp.type === type && otp.expiresAt > Date.now()) {
-          // Delete used OTP
           await db.ref(`otps/${key}`).remove();
           return true;
         }
@@ -103,7 +109,7 @@ const firebaseHelpers = {
 
   async getUserById(userId) {
     if (!db) throw new Error('Firebase not initialized');
-    
+
     try {
       const userRef = db.ref(`users/${userId}`);
       const snapshot = await userRef.once('value');
@@ -116,7 +122,35 @@ const firebaseHelpers = {
   }
 };
 
-// ---------- HEALTH ----------
+// ========== HEALTH CHECK ==========
+app.get('/health', async (req, res) => {
+  try {
+    let userCount = 0;
+    if (db) {
+      const usersRef = db.ref('users');
+      const snapshot = await usersRef.once('value');
+      userCount = snapshot.numChildren();
+    }
+
+    res.json({
+      status: 'OK',
+      message: 'TrendBet API with Firebase RTDB is running!',
+      database: db ? 'Firebase Realtime Database' : 'No Database',
+      usersCount: userCount,
+      firebaseStatus: db ? '✅ Connected' : '❌ Disconnected',
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    res.json({
+      status: 'OK',
+      message: 'TrendBet API is running (Firebase error)',
+      database: 'Firebase (Connection Issue)',
+      firebaseStatus: '❌ Connection Error',
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
 app.get('/api/health', async (req, res) => {
   try {
     let userCount = 0;
@@ -145,7 +179,68 @@ app.get('/api/health', async (req, res) => {
   }
 });
 
-// ---------- AUTH (EMAIL-ONLY with FIREBASE) ----------
+// ========== ROOT ==========
+app.get('/', (req, res) => {
+  res.json({
+    message: '🎲 TrendBet API',
+    version: '1.0.0',
+    status: 'running',
+    firebase: db ? '✅ Connected' : '❌ Disconnected'
+  });
+});
+
+// ========== MARKETS ==========
+app.get('/api/markets', async (req, res) => {
+  try {
+    if (!db) {
+      return res.status(500).json({ error: 'Database not available' });
+    }
+
+    const matchesRef = db.ref('matches');
+    const snapshot = await matchesRef.orderByChild('status').equalTo('active').once('value');
+    const matches = snapshot.val() || {};
+
+    const marketsArray = Object.keys(matches).map(id => ({
+      id,
+      ...matches[id]
+    }));
+
+    res.json({
+      success: true,
+      markets: marketsArray
+    });
+  } catch (error) {
+    console.error('❌ Error fetching markets:', error);
+    res.status(500).json({ error: 'Failed to fetch markets' });
+  }
+});
+
+app.get('/api/markets/:marketId', async (req, res) => {
+  try {
+    if (!db) {
+      return res.status(500).json({ error: 'Database not available' });
+    }
+
+    const { marketId } = req.params;
+    const matchRef = db.ref(`matches/${marketId}`);
+    const snapshot = await matchRef.once('value');
+    const match = snapshot.val();
+
+    if (!match) {
+      return res.status(404).json({ error: 'Market not found' });
+    }
+
+    res.json({
+      success: true,
+      market: { id: marketId, ...match }
+    });
+  } catch (error) {
+    console.error('❌ Error fetching market:', error);
+    res.status(500).json({ error: 'Failed to fetch market' });
+  }
+});
+
+// ========== AUTH ==========
 app.post('/api/auth/register', async (req, res) => {
   try {
     console.log('📧 REGISTRATION REQUEST:', req.body);
@@ -155,7 +250,6 @@ app.post('/api/auth/register', async (req, res) => {
       return res.status(400).json({ error: 'All fields are required' });
     }
 
-    // Validate email
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(email)) {
       return res.status(400).json({ error: 'Invalid email format' });
@@ -165,17 +259,15 @@ app.post('/api/auth/register', async (req, res) => {
       return res.status(500).json({ error: 'Database not available' });
     }
 
-    // Check if user exists
     const existingUser = await firebaseHelpers.getUserByEmail(email);
     if (existingUser) {
       return res.status(400).json({ error: 'User with this email already exists' });
     }
 
-    // Create user
     const user = await firebaseHelpers.createUser({
       name,
       email: email.toLowerCase(),
-      password, // Note: Hash this in production!
+      password,
       balance: 1000,
       totalWagered: 0,
       totalWinnings: 0,
@@ -183,7 +275,6 @@ app.post('/api/auth/register', async (req, res) => {
       emailVerified: false
     });
 
-    // Generate OTP
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
     await firebaseHelpers.storeOTP(email, otp, 'registration');
 
@@ -224,13 +315,11 @@ app.post('/api/auth/login', async (req, res) => {
       return res.status(401).json({ error: 'User not found' });
     }
 
-    // Check password (hash in production!)
     if (user.password !== password) {
       console.log('❌ Invalid password for:', cleanEmail);
       return res.status(401).json({ error: 'Invalid password' });
     }
 
-    // Generate OTP
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
     await firebaseHelpers.storeOTP(user.email, otp, 'login');
 
@@ -249,8 +338,48 @@ app.post('/api/auth/login', async (req, res) => {
   }
 });
 
-// Add your other routes (OTP verification, bets, etc.) here...
+app.post('/api/auth/verify-otp', async (req, res) => {
+  try {
+    const { email, otp, type } = req.body;
 
+    if (!email || !otp || !type) {
+      return res.status(400).json({ error: 'Email, OTP, and type are required' });
+    }
+
+    if (!db) {
+      return res.status(500).json({ error: 'Database not available' });
+    }
+
+    const isValid = await firebaseHelpers.verifyOTP(email, otp, type);
+
+    if (!isValid) {
+      return res.status(401).json({ error: 'Invalid or expired OTP' });
+    }
+
+    const user = await firebaseHelpers.getUserByEmail(email);
+
+    if (type === 'registration') {
+      await db.ref(`users/${user.id}/emailVerified`).set(true);
+    }
+
+    return res.json({
+      success: true,
+      message: 'OTP verified successfully',
+      user: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        balance: user.balance
+      }
+    });
+
+  } catch (error) {
+    console.error('💥 OTP VERIFICATION ERROR:', error);
+    return res.status(500).json({ error: 'OTP verification failed: ' + error.message });
+  }
+});
+
+// Start server
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
   console.log(`🚀 TrendBet Server running on port ${PORT}`);
