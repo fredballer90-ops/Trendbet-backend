@@ -2,3 +2,12 @@
 .env
 .env
 .env
+
+# Firebase credentials
+serviceAccount.json
+encoded.txt
+
+# Environment variables
+.env
+.env.local
+
