@@ -29,7 +29,7 @@ app.use((req, res, next) => {
 });
 
 // Import betting engine
-import { placeBet, getUserBalance, resolveMarket, setMarketFreeze } from './utils/bettingEngine-debug.js';
+import { placeBet, getUserBalance, resolveMarket, setMarketFreeze } from './utils/bettingEngine.js';
 
 // Firebase helper functions
 const firebaseHelpers = {
