@@ -11,7 +11,8 @@ app.use(cors({
     'http://192.168.2.100:3000',
     'http://localhost:5173',
     'https://trendbet.onrender.com',
-    'https://your-frontend.onrender.com'
+    'https://trendbet-c2793.web.app',           // ✅ Add your Firebase URL
+    'https://trendbet-c2793.firebaseapp.com'
   ],
   credentials: true
 }));
