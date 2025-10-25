@@ -1,5 +1,12 @@
 import admin from "../config/firebase.js";
-const db = admin.database();
+
+// Get database reference safely
+function getDb() {
+  if (!admin) {
+    throw new Error('Firebase Admin not initialized');
+  }
+  return admin.database();
+}
 
 /**
  * ==================== PLACE BET ====================
@@ -8,6 +15,8 @@ const db = admin.database();
 export const placeBet = async (userId, marketId, outcome, amount) => {
   try {
     console.log(`🎯 Placing bet:`, { userId, marketId, outcome, amount });
+    
+    const db = getDb();
 
     // Get user and market data
     const [userSnap, marketSnap] = await Promise.all([
@@ -18,13 +27,31 @@ export const placeBet = async (userId, marketId, outcome, amount) => {
     const user = userSnap.val();
     const market = marketSnap.val();
 
+    console.log('📊 User data:', user);
+    console.log('📊 Market data:', market);
+
     // --- Validations ---
-    if (!user) return { success: false, error: "User not found" };
-    if (!market) return { success: false, error: "Market not found" };
-    if (market.status !== "active") return { success: false, error: "Market is not active" };
+    if (!user) {
+      console.log('❌ User not found:', userId);
+      return { success: false, error: "User not found" };
+    }
+    
+    if (!market) {
+      console.log('❌ Market not found:', marketId);
+      return { success: false, error: "Market not found" };
+    }
+    
+    if (market.status !== "active") {
+      console.log('❌ Market not active:', market.status);
+      return { success: false, error: "Market is not active" };
+    }
 
     const availableBalance = (user.balance || 0) - (user.lockedBalance || 0);
-    if (availableBalance < amount) return { success: false, error: "Insufficient funds" };
+    console.log('💰 Available balance:', availableBalance, 'Required:', amount);
+    
+    if (availableBalance < amount) {
+      return { success: false, error: `Insufficient funds. Available: ${availableBalance}, Required: ${amount}` };
+    }
 
     // --- Calculate odds ---
     if (!market.pool) market.pool = { YES: 0, NO: 0 };
@@ -34,8 +61,10 @@ export const placeBet = async (userId, marketId, outcome, amount) => {
     const houseProbability = Math.min(0.99, probability * 1.05);
     const odds = Math.max(1.01, Math.round((1 / houseProbability) * 100) / 100);
 
+    console.log('🎲 Calculated odds:', odds);
+
     // --- Create bet ID ---
-    const betId = `bet_${Date.now()}_${userId}`;
+    const betId = `bet_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
     // --- Apply updates safely ---
     const updates = {};
@@ -52,12 +81,15 @@ export const placeBet = async (userId, marketId, outcome, amount) => {
       potentialPayout: Math.round(amount * odds * 100) / 100
     };
 
+    console.log('📝 Applying updates:', JSON.stringify(updates, null, 2));
+
     await db.ref().update(updates);
 
     console.log(`✅ Bet placed successfully: ${betId}`);
     return { success: true, betId };
   } catch (error) {
     console.error("❌ Bet placement error:", error);
+    console.error("Error stack:", error.stack);
     return { success: false, error: error.message };
   }
 };
@@ -67,11 +99,13 @@ export const placeBet = async (userId, marketId, outcome, amount) => {
  */
 export const getUserBalance = async (userId) => {
   try {
+    const db = getDb();
     const userRef = db.ref(`users/${userId}`);
     const snapshot = await userRef.once("value");
     const userData = snapshot.val();
 
     if (!userData) {
+      console.log(`⚠️ Creating new user: ${userId}`);
       const defaultData = {
         balance: 10000,
         lockedBalance: 0,
@@ -102,6 +136,8 @@ export const getUserBalance = async (userId) => {
  */
 export const resolveMarket = async (adminId, marketId, result) => {
   try {
+    const db = getDb();
+    
     // Verify admin
     const adminSnap = await db.ref(`admins/${adminId}`).once("value");
     if (!adminSnap.exists() || adminSnap.val() !== true) {
@@ -119,11 +155,17 @@ export const resolveMarket = async (adminId, marketId, result) => {
           const won = bet.outcome === result;
           const payout = won ? bet.amount * bet.odds : 0;
 
-          // Update user balances safely
-          updates[`users/${bet.userId}/lockedBalance`] = admin.database.ServerValue.increment(-bet.amount);
-          if (won) {
-            updates[`users/${bet.userId}/balance`] = admin.database.ServerValue.increment(payout);
-            updates[`users/${bet.userId}/totalWon`] = admin.database.ServerValue.increment(payout - bet.amount);
+          // Update user balances safely using increment
+          const userBalanceRef = `users/${bet.userId}`;
+          
+          // For losing bets, just unlock the amount
+          // For winning bets, unlock and add payout
+          if (!won) {
+            updates[`${userBalanceRef}/lockedBalance`] = admin.database.ServerValue.increment(-bet.amount);
+          } else {
+            updates[`${userBalanceRef}/lockedBalance`] = admin.database.ServerValue.increment(-bet.amount);
+            updates[`${userBalanceRef}/balance`] = admin.database.ServerValue.increment(payout);
+            updates[`${userBalanceRef}/totalWon`] = admin.database.ServerValue.increment(payout - bet.amount);
           }
 
           // Update bet status
@@ -153,6 +195,8 @@ export const resolveMarket = async (adminId, marketId, result) => {
  */
 export const setMarketFreeze = async (adminId, marketId, freeze = true) => {
   try {
+    const db = getDb();
+    
     const adminSnap = await db.ref(`admins/${adminId}`).once("value");
     if (!adminSnap.exists() || adminSnap.val() !== true) {
       throw new Error("Admin access required");
