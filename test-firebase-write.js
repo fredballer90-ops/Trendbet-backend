@@ -1,97 +1,35 @@
-
 import admin from './src/config/firebase.js';
 
-
-
-const testWrite = async () => {
-
+async function testWrite() {
   try {
-
     const db = admin.database();
-
     
-
-    console.log('🧪 Testing Firebase write permissions...');
-
+    console.log('🧪 Testing Firebase Admin write access...');
     
-
-    // Test 1: Write to bets
-
-    console.log('Test 1: Writing to bets/...');
-
-    await db.ref('bets/test_bet_123').set({
-
-      userId: 'test_user',
-
-      amount: 100,
-
+    // Test write
+    const testRef = db.ref('test_admin_write');
+    await testRef.set({
+      message: 'Admin SDK write test',
       timestamp: Date.now()
-
     });
-
-    console.log('✅ Write to bets/ successful');
-
     
-
-    // Test 2: Read from bets
-
-    console.log('Test 2: Reading from bets/...');
-
-    const snapshot = await db.ref('bets/test_bet_123').once('value');
-
-    console.log('✅ Read from bets/ successful:', snapshot.val());
-
+    console.log('✅ Write successful!');
     
-
-    // Test 3: Update user balance
-
-    console.log('Test 3: Writing to users/...');
-
-    await db.ref('users/test_user_123/balance').set(10000);
-
-    console.log('✅ Write to users/ successful');
-
+    // Test read
+    const snapshot = await testRef.once('value');
+    console.log('📖 Read successful:', snapshot.val());
     
-
-    // Test 4: Read users
-
-    console.log('Test 4: Reading from users/...');
-
-    const userSnapshot = await db.ref('users/test_user_123').once('value');
-
-    console.log('✅ Read from users/ successful:', userSnapshot.val());
-
-    
-
     // Clean up
-
-    console.log('🧹 Cleaning up test data...');
-
-    await db.ref('bets/test_bet_123').remove();
-
-    console.log('✅ All tests passed!');
-
+    await testRef.remove();
+    console.log('🗑️  Test data cleaned up');
     
-
     process.exit(0);
-
   } catch (error) {
-
-    console.error('❌ Firebase write test failed!');
-
-    console.error('Error message:', error.message);
-
+    console.error('❌ Firebase test failed:', error);
     console.error('Error code:', error.code);
-
-    console.error('Full error:', error);
-
+    console.error('Error details:', error.details);
     process.exit(1);
-
   }
-
-};
-
-
+}
 
 testWrite();
-
