@@ -19,11 +19,12 @@ const MarketCard = ({ market }) => {
       case 'trending': return <FaChartBar size={20} />;
       default: return <FaChartBar size={20} />;
     }
-  };                                                       
+  };
+
   const getCategoryColor = (category) => {
     switch(category) {
       case 'politics': return '#3b82f6';
-      case 'entertainment': return '#8b5cf6';                    
+      case 'entertainment': return '#8b5cf6';
       case 'sports': return '#10b981';
       case 'breaking': return '#ef4444';
       case 'trending': return '#f59e0b';
@@ -55,30 +56,33 @@ const MarketCard = ({ market }) => {
 
     setLoading(true);
     try {
+      // ✅ FIXED: Send data in format backend expects
       const betData = {
+        userId: user.id,              // ✅ Added userId
         marketId: market.id,
-        event: market.title,
-        selection: selectedOutcome.name,
-        odds: selectedOutcome.odds,
-        stake: amount,
-        potentialWin: amount * selectedOutcome.odds,
-        category: market.category
+        outcome: selectedOutcome.name, // ✅ Changed "selection" to "outcome"
+        amount: amount                 // ✅ Changed "stake" to "amount"
       };
+
+      console.log('📤 Sending bet:', betData);
 
       const response = await api.post('/api/bets/place', betData);
 
+      console.log('📥 Response:', response.data);
+
       if (response.data.success) {
-        alert(`✅ Bet placed successfully!\nPotential payout: KSH ${(amount * selectedOutcome.odds).toLocaleString()}`);
+        alert(`✅ Bet placed successfully!\nBet ID: ${response.data.betId}\nPotential payout: KSH ${(amount * selectedOutcome.odds).toLocaleString()}`);
         // Reset interface
         setSelectedOutcome(null);
         setBetAmount('');
         setShowBetInterface(false);
       } else {
-        alert(`❌ Bet failed: ${response.data.message}`);
+        alert(`❌ Bet failed: ${response.data.error || response.data.message}`);
       }
     } catch (error) {
-      console.error('Bet placement error:', error);
-      alert(`❌ Bet placement failed: ${error.response?.data?.message || error.message}`);
+      console.error('❌ Bet placement error:', error);
+      console.error('Error response:', error.response?.data);
+      alert(`❌ Bet placement failed: ${error.response?.data?.error || error.message}`);
     } finally {
       setLoading(false);
     }
@@ -332,7 +336,7 @@ const MarketCard = ({ market }) => {
               }
             }}
           >
-            {loading ? 'Placing Bet...' : 
+            {loading ? 'Placing Bet...' :
              !betAmount || parseFloat(betAmount) < 100 ? 'Enter Amount' : 'Place Bet'}
           </button>
         </div>
