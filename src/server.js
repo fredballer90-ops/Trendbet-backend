@@ -204,13 +204,19 @@ app.get('/api/markets', async (req, res) => {
     }
 
     const marketsRef = db.ref('markets');
-    const snapshot = await marketsRef.orderByChild('status').equalTo('active').once('value');
-    const markets = snapshot.val() || {};
+    const snapshot = await marketsRef.once('value');
+    const allMarkets = snapshot.val() || {};
 
-    const marketsArray = Object.keys(markets).map(id => ({
-      id,
-      ...markets[id]
-    }));
+    // Filter for both 'active' AND 'open' markets
+    const marketsArray = Object.keys(allMarkets)
+      .filter(id => {
+        const status = allMarkets[id].status;
+        return status === 'active' || status === 'open';
+      })
+      .map(id => ({
+        id,
+        ...allMarkets[id]
+      }));
 
     res.json({
       success: true,
@@ -247,6 +253,7 @@ app.get('/api/markets/:marketId', async (req, res) => {
     res.status(500).json({ error: 'Failed to fetch market' });
   }
 });
+
 
 // ========== BETTING ROUTES ==========
 app.post('/api/bets/place', async (req, res) => {
