@@ -3,7 +3,6 @@ import express from "express";
 import cors from "cors";
 import admin from "./config/firebase.js";
 import betsRoutes from './routes/bets.js';
-import bcrypt from 'bcryptjs';
 
 const app = express();
 
@@ -14,7 +13,7 @@ app.use(cors({
     'http://192.168.2.100:3000',
     'http://localhost:5173',
     'https://trendbet.onrender.com',
-    'https://trendbet-c2793.web.app',
+    'https://trendbet-c2793.web.app',           // ✅ Add your Firebase URL
     'https://trendbet-c2793.firebaseapp.com'
   ],
   credentials: true
@@ -255,9 +254,9 @@ app.post('/api/bets/place', async (req, res) => {
     const { userId, marketId, outcome, amount } = req.body;
 
     if (!userId || !marketId || !outcome || !amount) {
-      return res.status(400).json({
-        success: false,
-        error: 'Missing required fields: userId, marketId, outcome, amount'
+      return res.status(400).json({ 
+        success: false, 
+        error: 'Missing required fields: userId, marketId, outcome, amount' 
       });
     }
 
@@ -269,7 +268,7 @@ app.post('/api/bets/place', async (req, res) => {
     }
 
     const result = await placeBet(userId, marketId, outcome, amount);
-
+    
     if (result.success) {
       res.json({
         success: true,
@@ -295,13 +294,13 @@ app.post('/api/bets/place', async (req, res) => {
 app.get('/api/users/:userId/balance', async (req, res) => {
   try {
     const { userId } = req.params;
-
+    
     if (!userId) {
       return res.status(400).json({ error: 'User ID is required' });
     }
 
     const balanceInfo = await getUserBalance(userId);
-
+    
     res.json({
       success: true,
       balance: balanceInfo.balance,
@@ -333,7 +332,7 @@ app.post('/api/admin/resolve-market', async (req, res) => {
     }
 
     const resolutionResult = await resolveMarket(adminId, marketId, result);
-
+    
     if (resolutionResult.success) {
       res.json({
         success: true,
@@ -367,7 +366,7 @@ app.post('/api/admin/freeze-market', async (req, res) => {
     }
 
     const freezeResult = await setMarketFreeze(adminId, marketId, freeze);
-
+    
     if (freezeResult.success) {
       res.json({
         success: true,
@@ -413,12 +412,10 @@ app.post('/api/auth/register', async (req, res) => {
       return res.status(400).json({ error: 'User with this email already exists' });
     }
 
-    const passwordHash = await bcrypt.hash(password, 10);
-
     const user = await firebaseHelpers.createUser({
       name,
       email: email.toLowerCase(),
-      passwordHash,
+      password,
       balance: 1000,
       totalWagered: 0,
       totalWinnings: 0,
@@ -463,12 +460,12 @@ app.post('/api/auth/login', async (req, res) => {
 
     if (!user) {
       console.log('❌ User not found:', cleanEmail);
-      return res.status(401).json({ error: 'Invalid email or password' });
+      return res.status(401).json({ error: 'User not found' });
     }
 
-    if (!user.passwordHash || !(await bcrypt.compare(password, user.passwordHash))) {
+    if (user.password !== password) {
       console.log('❌ Invalid password for:', cleanEmail);
-      return res.status(401).json({ error: 'Invalid email or password' });
+      return res.status(401).json({ error: 'Invalid password' });
     }
 
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
@@ -486,98 +483,6 @@ app.post('/api/auth/login', async (req, res) => {
   } catch (error) {
     console.error('💥 LOGIN ERROR:', error);
     return res.status(500).json({ error: 'Login failed: ' + error.message });
-  }
-});
-
-app.post('/api/auth/verify-registration-otp', async (req, res) => {
-  try {
-    const { phone, otpCode, userId } = req.body;
-    const email = phone;
-
-    if (!email || !otpCode) {
-      return res.status(400).json({ error: 'Email and OTP are required' });
-    }
-
-    if (!db) {
-      return res.status(500).json({ error: 'Database not available' });
-    }
-
-    const isValid = await firebaseHelpers.verifyOTP(email, otpCode, 'registration');
-
-    if (!isValid) {
-      return res.status(401).json({ error: 'Invalid or expired OTP' });
-    }
-
-    const user = await firebaseHelpers.getUserByEmail(email);
-    if (!user) {
-      return res.status(404).json({ error: 'User not found' });
-    }
-
-    await db.ref(`users/${user.id}/emailVerified`).set(true);
-
-    const token = Buffer.from(`${user.id}:${Date.now()}`).toString('base64');
-
-    return res.json({
-      success: true,
-      message: 'Registration verified successfully',
-      token,
-      user: {
-        id: user.id,
-        name: user.name,
-        email: user.email,
-        balance: user.balance,
-        role: user.role
-      }
-    });
-
-  } catch (error) {
-    console.error('💥 REGISTRATION OTP VERIFICATION ERROR:', error);
-    return res.status(500).json({ error: 'Verification failed: ' + error.message });
-  }
-});
-
-app.post('/api/auth/verify-login-otp', async (req, res) => {
-  try {
-    const { phone, otpCode } = req.body;
-    const email = phone;
-
-    if (!email || !otpCode) {
-      return res.status(400).json({ error: 'Email and OTP are required' });
-    }
-
-    if (!db) {
-      return res.status(500).json({ error: 'Database not available' });
-    }
-
-    const isValid = await firebaseHelpers.verifyOTP(email, otpCode, 'login');
-
-    if (!isValid) {
-      return res.status(401).json({ error: 'Invalid or expired OTP' });
-    }
-
-    const user = await firebaseHelpers.getUserByEmail(email);
-    if (!user) {
-      return res.status(404).json({ error: 'User not found' });
-    }
-
-    const token = Buffer.from(`${user.id}:${Date.now()}`).toString('base64');
-
-    return res.json({
-      success: true,
-      message: 'Login successful',
-      token,
-      user: {
-        id: user.id,
-        name: user.name,
-        email: user.email,
-        balance: user.balance,
-        role: user.role
-      }
-    });
-
-  } catch (error) {
-    console.error('💥 LOGIN OTP VERIFICATION ERROR:', error);
-    return res.status(500).json({ error: 'Verification failed: ' + error.message });
   }
 });
 
