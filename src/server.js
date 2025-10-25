@@ -1,6 +1,7 @@
 import express from "express";
 import cors from "cors";
 import admin from "./config/firebase.js";
+import betsRoutes from './routes/bets.js';
 
 const app = express();
 
@@ -524,6 +525,9 @@ app.post('/api/auth/verify-otp', async (req, res) => {
     return res.status(500).json({ error: 'OTP verification failed: ' + error.message });
   }
 });
+
+// Mount bets routes
+app.use('/api/bets', betsRoutes);
 
 // Start server
 const PORT = process.env.PORT || 10000;
